@@ -46,6 +46,24 @@ python -m streamlit run chat_app.py  # chat demo with mock messy data + retry tr
 
 Then: upload 1+ CSVs (or use the built-in mock data in `chat_app.py`) → type a question → run.
 
+## Test
+
+```powershell
+# 1. Key wiring (no API cost) — should print True + model name
+python -c "from agent.llm_prompt import _resolve_api_key, _resolve_model; print(bool(_resolve_api_key()), _resolve_model())"
+# .env must stay local — should print ".gitignore:2:.env" and NOT appear in status
+git check-ignore -v .env
+git status --short
+
+# 2. Sandbox only (no API cost) — should print True '4'
+python -c "from sandbox.executor import ExecutionSandbox; r=ExecutionSandbox().run('print(2+2)'); print(r.success, repr(r.stdout))"
+
+# 3. Live Groq call (uses key) — should return runnable python with print(...)
+python -c "from agent.llm_prompt import generate_code; print(generate_code('What is 2+2?', 'No tables needed, just print 2+2.'))"
+```
+
+If step 3 says `GROQ_API_KEY is not set`, your `.env` isn't loading. To prove the sidebar override works, rename `.env` to `.env.bak`, restart the app (it should warn "No API key"), then paste the key in the sidebar / website key field.
+
 ## Host on Streamlit Cloud (`xxx.streamlit.app`)
 
 1. Push latest to GitHub.
