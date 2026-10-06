@@ -19,8 +19,8 @@ from pathlib import Path
 
 from groq import Groq
 
-# --- Portable key loading: .env file + env vars + Streamlit secrets ---
-# Works on any laptop without hard-coding keys. Never commit real keys.
+# --- Key loading: .env file only (plus explicit arg / env var) ---
+# .env is gitignored and holds GROQ_API_KEY locally. Never commit it.
 try:
     from dotenv import load_dotenv
 
@@ -46,50 +46,22 @@ except Exception:
 
 
 def _resolve_api_key(explicit: str | None = None) -> str | None:
-    """Resolve GROQ_API_KEY from explicit arg -> env -> .env -> Streamlit secrets."""
+    """Resolve GROQ_API_KEY from explicit arg -> env var / .env file."""
     if explicit and str(explicit).strip():
         return str(explicit).strip()
     key = os.getenv("GROQ_API_KEY")
     if key and key.strip():
         return key.strip()
-    # Streamlit secrets (only when running under Streamlit; optional dep).
-    try:
-        import streamlit as st  # type: ignore
-
-        for _section in ("groq", "general"):
-            try:
-                _sec = st.secrets.get(_section, {}) if hasattr(st, "secrets") else {}
-                if isinstance(_sec, dict) and _sec.get("GROQ_API_KEY"):
-                    return str(_sec["GROQ_API_KEY"]).strip()
-            except Exception:
-                continue
-        try:
-            if hasattr(st, "secrets") and st.secrets.get("GROQ_API_KEY"):
-                return str(st.secrets["GROQ_API_KEY"]).strip()
-        except Exception:
-            pass
-    except Exception:
-        pass
     return None
 
 
 def _resolve_model(explicit: str | None = None) -> str:
-    """Resolve model from explicit arg -> env -> Streamlit secrets -> default."""
+    """Resolve model from explicit arg -> env var / .env file -> default."""
     if explicit and str(explicit).strip():
         return str(explicit).strip()
     env_model = os.getenv("GROQ_MODEL")
     if env_model and env_model.strip():
         return env_model.strip()
-    try:
-        import streamlit as st  # type: ignore
-
-        try:
-            if hasattr(st, "secrets") and st.secrets.get("GROQ_MODEL"):
-                return str(st.secrets["GROQ_MODEL"]).strip()
-        except Exception:
-            pass
-    except Exception:
-        pass
     return "openai/gpt-oss-120b"
 
 # Exact canonical refusal. No variants allowed downstream.
@@ -97,7 +69,7 @@ REFUSAL = "I cannot determine this."
 
 # Default model (import-time snapshot for backwards compat).
 # generate_code() re-resolves at call time via _resolve_model() so
-# .env / Streamlit secrets / env vars all work without code edits.
+# .env / env vars work without code edits.
 # NOTE: llama-3.3-70b-versatile was retired by Groq (Aug 2026, enterprise-only);
 # the free-tier replacement is openai/gpt-oss-120b.
 MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
@@ -229,9 +201,9 @@ def generate_code(user_question: str, schema_context: str = "", error_history=No
         error_history: Prior failure(s) — string or list of strings, e.g.
             "KeyError: 'revenue'". Fed back so the model can self-correct.
         api_key: Optional explicit key (used by Streamlit sidebar input).
-            If None, resolved from env -> .env -> Streamlit secrets.
+            If None, resolved from env var / .env file.
         model: Optional explicit model override. If None, resolved from
-            env -> Streamlit secrets -> default.
+            env var / .env file -> default.
 
     Returns:
         Raw runnable Python code, or exactly "I cannot determine this.".
@@ -239,10 +211,9 @@ def generate_code(user_question: str, schema_context: str = "", error_history=No
     resolved_key = _resolve_api_key(api_key)
     if not resolved_key:
         raise RuntimeError(
-            "GROQ_API_KEY is not set. Use ONE of:\n"
-            "  1) Environment variable: set GROQ_API_KEY (e.g. $env:GROQ_API_KEY='gsk_...' on Windows)\n"
-            "  2) .env file in project root with: GROQ_API_KEY=gsk_...  (see .env.example)\n"
-            "  3) Streamlit: sidebar key field or .streamlit/secrets.toml with GROQ_API_KEY\n"
+            "GROQ_API_KEY is not set. Set it in the .env file in project root:\n"
+            "  GROQ_API_KEY=gsk_...  (see README)\n"
+            "Or pass it via the sidebar / request key field, or env var.\n"
             "Get a key at https://console.groq.com/keys — never commit the real key."
         )
     resolved_model = _resolve_model(model)

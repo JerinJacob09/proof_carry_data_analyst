@@ -1,4 +1,4 @@
-# Environments
+# Environments - GROQ_API_KEY lives in .env (never commit)
 .env
 .venv
 env/
@@ -6,9 +6,6 @@ venv/
 ENV/
 env.bak/
 venv.bak/
-
-# Streamlit + API keys — each laptop uses its own, never commit real keys
-.streamlit/secrets.toml.example
 
 # Python cache
 __pycache__/
@@ -19,6 +16,4 @@ __pycache__/
 .DS_Store
 Thumbs.db
 
-.streamlit
-.streamlit/
 .vscode/

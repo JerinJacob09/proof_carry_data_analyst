@@ -7,7 +7,7 @@ Run on any laptop:
 Then open http://127.0.0.1:8000
 
 API key priority (never commit a real key):
-    request field > env var > .env file > .streamlit/secrets.toml
+    request field > env var / .env file
 The frontend key field is optional if the server already has one of the others.
 """
 
@@ -99,7 +99,7 @@ async def analyze(
             return {
                 "ok": False,
                 "error": str(exc),
-                "hint": "Paste your key in the website key field, or set it via .env / secrets.toml / env var. See README.",
+                "hint": "Paste your key in the website key field, or set it in .env / env var. See README.",
             }
         except Exception as exc:  # noqa: BLE001 - e.g. network/Groq error
             return {"ok": False, "error": f"Groq request failed: {exc}"}

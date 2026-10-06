@@ -2,11 +2,11 @@
 
 Run on any laptop:
     pip install -r requirements.txt
-    copy .env.example -> .env  (or use the sidebar key field)
+    # create .env with GROQ_API_KEY=gsk_... (gitignored)
     streamlit run app.py
 
 Key priority (handled in agent/llm_prompt.py):
-    sidebar input > env var > .env file > .streamlit/secrets.toml
+    sidebar input > env var / .env file
 """
 
 import contextlib
@@ -71,7 +71,7 @@ def _run_code(code: str, tables: dict):
 with st.sidebar:
     st.header("Setup")
     st.markdown("Key is **never committed**. Pick one per laptop:")
-    st.markdown("1. Paste below, 2. `$env:GROQ_API_KEY`, 3. `.env`, 4. `.streamlit/secrets.toml`")
+    st.markdown("1. Paste below, 2. `.env` file (`GROQ_API_KEY=...`)")
     sidebar_key = st.text_input("GROQ_API_KEY", value="", type="password", help="Get one at console.groq.com/keys")
     default_model = _resolve_model()
     model = st.text_input("GROQ_MODEL", value=default_model)
@@ -81,7 +81,7 @@ with st.sidebar:
     if effective_key:
         st.success("API key found.")
     else:
-        st.warning("No API key. Paste it above or see .env.example.")
+        st.warning("No API key. Paste it above or add GROQ_API_KEY to .env.")
 
 # ---------- Main: data + question ----------
 uploaded = st.file_uploader("Upload CSV table(s)", type=["csv"], accept_multiple_files=True)
@@ -116,9 +116,9 @@ question = st.text_area(
 run = st.button("Generate proof + run", type="primary", disabled=not (tables and question.strip()))
 
 if run:
-    api_key = sidebar_key.strip() or None  # None -> generate_code resolves env/.env/secrets
+    api_key = sidebar_key.strip() or None  # None -> generate_code resolves env/.env
     if not (api_key or _resolve_api_key()):
-        st.error("Missing GROQ_API_KEY. Paste it in the sidebar or create `.env` from `.env.example`.")
+        st.error("Missing GROQ_API_KEY. Paste it in the sidebar or add it to `.env`.")
         st.stop()
 
     with st.spinner("Asking Groq for proof code..."):
