@@ -2,9 +2,11 @@ from dataclasses import dataclass
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 import tempfile
+import time
 from typing import Any, Dict, Optional
 
 
@@ -19,13 +21,13 @@ class SandboxResult:
 
 
 class ExecutionSandbox:
-    """Safely executes generated Python code in an isolated subprocess,
+    """Safely executes dynamically generated Python scripts in an isolated subprocess,
 
-    enforcing timeouts, capturing stdout/stderr, and extracting the final proof
-    JSON.
+    enforcing execution limits, capturing outputs, and extracting structured
+    proofs.
     """
 
-    def __init__(self, default_timeout: float = 8.0):
+    def __init__(self, default_timeout: float = 10.0):
         self.default_timeout = default_timeout
 
     def run(
@@ -34,46 +36,48 @@ class ExecutionSandbox:
         timeout: Optional[float] = None,
         working_dir: Optional[str] = None,
     ) -> SandboxResult:
-        timeout = timeout or self.default_timeout
+        """Executes code string in a temporary standalone process."""
+        effective_timeout = timeout or self.default_timeout
+        sanitized_code = self._clean_code(code_string)
 
-        # Clean code fences if the LLM output raw markdown
-        cleaned_code = self._clean_code(code_string)
-
-        # Execute inside a temporary file or specific directory
         with tempfile.TemporaryDirectory() as temp_dir:
-            exec_dir = working_dir if working_dir else temp_dir
-            script_path = Path(temp_dir) / "generated_proof.py"
-            script_path.write_text(cleaned_code, encoding="utf-8")
+            exec_path = Path(working_dir) if working_dir else Path(temp_dir)
+            script_file = Path(temp_dir) / "proof_runner.py"
+            script_file.write_text(sanitized_code, encoding="utf-8")
 
-            cmd = [sys.executable, str(script_path)]
+            # Environment flags: disable buffering and bytecode writing
+            child_env = {
+                **os.environ,
+                "PYTHONUNBUFFERED": "1",
+                "PYTHONDONTWRITEBYTECODE": "1",
+                "PYTHONIOENCODING": "utf-8",
+            }
+
+            start_time = time.perf_counter()
 
             try:
                 proc = subprocess.run(
-                    cmd,
-                    cwd=exec_dir,
+                    [sys.executable, str(script_file)],
+                    cwd=str(exec_path),
                     capture_output=True,
                     text=True,
-                    timeout=timeout,
-                    env={
-                        **os.environ,
-                        "PYTHONIOENCODING": "utf-8",
-                        "PYTHONDONTWRITEBYTECODE": "1",
-                    },
+                    timeout=effective_timeout,
+                    env=child_env,
                 )
+                elapsed = round(time.perf_counter() - start_time, 4)
 
                 stdout = proc.stdout.strip()
                 stderr = proc.stderr.strip()
 
-                # Execution failed (SyntaxError, Uncaught Exception, Assertion Failure)
                 if proc.returncode != 0:
                     return SandboxResult(
                         success=False,
                         stdout=stdout,
                         stderr=stderr,
-                        error_type="RuntimeError",
+                        error_type="RuntimeExecutionError",
+                        execution_time_seconds=elapsed,
                     )
 
-                # Try parsing the final proof JSON emitted by the code
                 parsed_json = self._extract_proof_json(stdout)
 
                 return SandboxResult(
@@ -81,50 +85,58 @@ class ExecutionSandbox:
                     stdout=stdout,
                     stderr=stderr,
                     parsed_json=parsed_json,
+                    execution_time_seconds=elapsed,
                 )
 
             except subprocess.TimeoutExpired:
+                elapsed = round(time.perf_counter() - start_time, 4)
                 return SandboxResult(
                     success=False,
                     stdout="",
-                    stderr=f"TimeoutError: Execution exceeded {timeout} seconds limit (possible infinite loop).",
+                    stderr=f"TimeoutError: Execution exceeded the {effective_timeout}s budget.",
                     error_type="TimeoutError",
+                    execution_time_seconds=elapsed,
                 )
             except Exception as exc:
+                elapsed = round(time.perf_counter() - start_time, 4)
                 return SandboxResult(
                     success=False,
                     stdout="",
-                    stderr=f"SandboxError: {str(exc)}",
-                    error_type="SandboxError",
+                    stderr=f"SandboxInfrastructureError: {str(exc)}",
+                    error_type="InfrastructureError",
+                    execution_time_seconds=elapsed,
                 )
 
     @staticmethod
     def _clean_code(raw_code: str) -> str:
-        """Strips markdown python backticks if present."""
+        """Strips markdown code blocks, backticks, and surrounding whitespace."""
         code = raw_code.strip()
-        if code.startswith("```"):
-            lines = code.splitlines()
-            if lines[0].startswith("```"):
-                lines = lines[1:]
-            if lines and lines[-1].strip() == "```":
-                lines = lines[:-1]
-            code = "\n".join(lines)
-        return code
+        # Remove ```python and ``` block wrappers
+        code = re.sub(r"^```(?:python)?\s*", "", code, flags=re.IGNORECASE)
+        code = re.sub(r"\s*```$", "", code)
+        return code.strip()
 
     @staticmethod
     def _extract_proof_json(stdout: str) -> Optional[Dict[str, Any]]:
-        """Finds the last valid JSON dictionary emitted in stdout."""
+        """Scans backward for the last valid JSON dictionary emitted in stdout."""
         if not stdout:
             return None
 
-        # Look backwards for the terminal JSON block
-        start_idx = stdout.rfind("{")
-        end_idx = stdout.rfind("}")
+        # Try parsing line-by-line in reverse order first (most common case: print(json.dumps(...)))
+        lines = [line.strip() for line in stdout.splitlines() if line.strip()]
+        for line in reversed(lines):
+            if line.startswith("{") and line.endswith("}"):
+                try:
+                    return json.loads(line)
+                except json.JSONDecodeError:
+                    continue
 
-        if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
-            candidate = stdout[start_idx : end_idx + 1]
+        # Fallback: Find matching brace block anywhere in the output
+        matches = list(re.finditer(r"(\{.*\})", stdout, re.DOTALL))
+        for match in reversed(matches):
             try:
-                return json.loads(candidate)
+                return json.loads(match.group(1))
             except json.JSONDecodeError:
-                pass
+                continue
+
         return None
