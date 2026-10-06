@@ -7,6 +7,9 @@ ENV/
 env.bak/
 venv.bak/
 
+# Streamlit + API keys — each laptop uses its own, never commit real keys
+.streamlit/secrets.toml
+
 # Python cache
 __pycache__/
 *.py[cod]
