@@ -47,6 +47,17 @@ def test_sandbox_does_not_verify_hard_coded_output(tmp_path):
     assert res.error_type == "VerificationError"
 
 
+def test_sandbox_reads_csv_with_python_string_storage(tmp_path):
+    (tmp_path / "strings.csv").write_text("label\nhello\n", encoding="utf-8")
+    res = ExecutionSandbox().run(
+        "df = pd.read_csv('strings.csv')\nprint(pd.options.mode.string_storage)",
+        working_dir=str(tmp_path),
+    )
+    assert res.success, res.stderr
+    assert res.verified
+    assert res.stdout.strip() == "python"
+
+
 def test_sandbox_rejects_os_import(tmp_path, monkeypatch):
     monkeypatch.setenv("GROQ_API_KEY", "gsk_should_not_leak")
     res = ExecutionSandbox().run(
