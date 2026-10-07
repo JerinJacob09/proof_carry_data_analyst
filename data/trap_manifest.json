@@ -1,0 +1,112 @@
+{
+  "orders.csv": {
+    "rows": 113,
+    "unique_order_ids": 100,
+    "exact_duplicate_rows": 10,
+    "conflicting_duplicate_order_ids": [
+      3054,
+      3071,
+      3084
+    ],
+    "blank_order_dates": 11,
+    "ambiguous_slash_dates": 18,
+    "orphan_user_ids": [
+      9991,
+      9992,
+      9993,
+      9994
+    ],
+    "orphan_product_ids": [
+      2997,
+      2998,
+      2999
+    ],
+    "price_conflicts_vs_inventory_order_ids": [
+      3010,
+      3036,
+      3052,
+      3088,
+      3090,
+      3100
+    ],
+    "prices_missing_currency_order_ids": [
+      3010,
+      3068,
+      3084
+    ],
+    "price_formats": [
+      "49.99 USD",
+      "$49.99",
+      "€49.99",
+      "49,99 EUR",
+      "£12.50",
+      "CA$10.00",
+      "A$8.20",
+      "₹999.00",
+      "¥1500.00",
+      "12.00 GBP",
+      "49.99 (no unit)"
+    ],
+    "price_units_present": [
+      "AUD",
+      "EUR",
+      "GBP",
+      "INR",
+      "JPY",
+      "USD"
+    ]
+  },
+  "users.csv": {
+    "rows": 45,
+    "unique_user_ids": 40,
+    "exact_duplicate_rows": 4,
+    "conflicting_duplicate_user_ids": [
+      1004
+    ],
+    "blank_signup_dates": 6,
+    "ambiguous_slash_dates": 9,
+    "blank_emails": 5,
+    "country_spelling_variants": {
+      "United States": [
+        "United States",
+        "USA",
+        "US",
+        "u.s.a."
+      ],
+      "Germany": [
+        "Germany",
+        "DE",
+        "germany"
+      ],
+      "France": [
+        "France",
+        "FR"
+      ],
+      "India": [
+        "India",
+        "IN",
+        "india "
+      ]
+    }
+  },
+  "inventory.csv": {
+    "rows": 23,
+    "unique_product_ids": 20,
+    "exact_duplicate_rows": 3,
+    "blank_restock_dates": 4,
+    "ambiguous_slash_dates": 3,
+    "products_missing_currency": [
+      2006,
+      2011
+    ],
+    "products_missing_stock": [
+      2008,
+      2016
+    ],
+    "products_zero_stock": [
+      2003,
+      2010
+    ]
+  },
+  "data_notes.md": "Every statement contradicts the CSVs (currency, date format, orphan users, zero stock)."
+}

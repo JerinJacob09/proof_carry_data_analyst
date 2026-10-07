@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 
 SEED = 42
-OUT = Path("messy_data")
+OUT = Path(__file__).resolve().parent
 rng = np.random.default_rng(SEED)
 
 N_USERS, N_PRODUCTS, N_ORDERS = 40, 20, 100
@@ -46,12 +46,24 @@ def messy_dates(true_dates, blank_count):
     return values, sorted(int(b) for b in blanks)
 
 
+CURRENCY_SYMBOLS = {
+    "USD": "$",
+    "EUR": "€",
+    "GBP": "£",
+    "INR": "₹",
+    "JPY": "¥",
+    "CAD": "CA$",
+    "AUD": "A$",
+}
+
+
 def messy_price(amount, currency, style):
-    """Same value, many textual representations."""
+    """Same value, many textual representations — not limited to USD/EUR."""
+    sym = CURRENCY_SYMBOLS.get(currency)
     if style == 0:
-        return f"{amount:.2f} {currency}"                       # 49.99 USD
-    if style == 1:
-        return f"{'$' if currency == 'USD' else '€'}{amount:.2f}"  # $49.99 / €49.99
+        return f"{amount:.2f} {currency}"                       # 49.99 GBP
+    if style == 1 and sym:
+        return f"{sym}{amount:.2f}"                             # £49.99 / CA$49.99
     if style == 2 and currency == "EUR":
         return f"{amount:.2f}".replace(".", ",") + " EUR"       # 49,99 EUR
     return f"{amount:.2f} {currency}"
@@ -96,13 +108,18 @@ conflict_user["country"] = "Canada"
 # ----------------------------------------------------------------------
 product_ids = np.arange(2001, 2001 + N_PRODUCTS)
 inv_amount = np.round(rng.uniform(5, 250, N_PRODUCTS), 2)
-inv_currency = np.where(np.arange(N_PRODUCTS) % 2 == 0, "USD", "EUR")
+# Keep EUR on odd ids (RNG-stable). Replace some even-id USD slots with other units.
+_other_units = {0: "GBP", 4: "INR", 8: "JPY", 12: "CAD", 16: "AUD"}
+inv_currency = np.array([
+    "EUR" if i % 2 == 1 else _other_units.get(i, "USD")
+    for i in range(N_PRODUCTS)
+])
 restock_true = random_dates(N_PRODUCTS)
 restock_str, restock_blanks = messy_dates(restock_true, blank_count=3)
 
 inv_price = [messy_price(a, c, i % 3) for i, (a, c) in enumerate(zip(inv_amount, inv_currency))]
 # Missing currency: the number is there, the unit is not
-no_currency_products = [5, 12]
+no_currency_products = [5, 10]  # EUR + USD; keep GBP/INR/JPY/CAD/AUD labeled
 for i in no_currency_products:
     inv_price[i] = f"{inv_amount[i]:.2f}"
 
@@ -155,9 +172,20 @@ price_conflict_idx = sorted(int(i) for i in rng.choice(valid, 6, replace=False))
 o_amount[price_conflict_idx] = np.round(o_amount[price_conflict_idx] * 1.25, 2)
 
 o_price = [messy_price(a, c, i % 3) for i, (a, c) in enumerate(zip(o_amount, o_currency))]
-order_no_currency_idx = sorted(int(i) for i in rng.choice(N_ORDERS, 3, replace=False))
+usd_eur_idx = [i for i in range(N_ORDERS) if o_currency[i] in ("USD", "EUR")]
+order_no_currency_idx = sorted(int(i) for i in rng.choice(usd_eur_idx, 3, replace=False))
 for i in order_no_currency_idx:
     o_price[i] = f"{o_amount[i]:.2f}"
+
+# Make sure GBP/INR/JPY/CAD/AUD actually appear in orders, not only inventory.
+for code in ("GBP", "INR", "JPY", "CAD", "AUD"):
+    if code in o_currency:
+        continue
+    for i, c in enumerate(o_currency):
+        if c == "USD" and i not in order_no_currency_idx:
+            o_currency[i] = code
+            o_price[i] = messy_price(o_amount[i], code, i % 3)
+            break
 
 order_true = random_dates(N_ORDERS)
 order_str, order_blanks = messy_dates(order_true, blank_count=10)
@@ -235,7 +263,11 @@ manifest = {
         "orphan_product_ids": [2997, 2998, 2999],
         "price_conflicts_vs_inventory_order_ids": [int(order_ids[i]) for i in price_conflict_idx],
         "prices_missing_currency_order_ids": [int(order_ids[i]) for i in order_no_currency_idx],
-        "price_formats": ["49.99 USD", "$49.99", "€49.99", "49,99 EUR", "49.99 (no currency)"],
+        "price_formats": [
+            "49.99 USD", "$49.99", "€49.99", "49,99 EUR", "£12.50", "CA$10.00",
+            "A$8.20", "₹999.00", "¥1500.00", "12.00 GBP", "49.99 (no unit)",
+        ],
+        "price_units_present": sorted({c for c in o_currency if c}),
     },
     "users.csv": {
         "rows": len(users_out),
@@ -270,7 +302,7 @@ questions = [
      "trap": "Duplicates inflate the sum. Dedupe on order_id first (conflicting dupes only differ in status)."},
     {"q": "What is the total revenue in USD?",
      "expected": REFUSE,
-     "trap": "Mixed USD/EUR, no exchange rate given, some prices have no currency. data_notes.md wrongly claims all USD."},
+     "trap": "Mixed units (USD/EUR/GBP/INR/JPY/CAD/AUD), no FX table, some prices have no unit. data_notes.md wrongly claims all USD."},
     {"q": "How many orders were placed in April 2025?",
      "expected": REFUSE,
      "trap": "Ambiguous dd/mm vs mm/dd dates and blank dates make the count undeterminable."},
@@ -282,7 +314,7 @@ questions = [
      "trap": "Duplicates and a conflicting duplicate (user 1004 with two countries)."},
     {"q": "Which user spent the most money?",
      "expected": REFUSE,
-     "trap": "Requires summing USD and EUR together."},
+     "trap": "Requires summing across mixed units with no exchange rates."},
     {"q": "What is the total EUR revenue (price x quantity) from Completed orders with a clearly stated EUR currency, excluding orders with conflicting duplicate rows?",
      "expected": round(float((eur_completed.amount * eur_completed.quantity).sum()), 2),
      "trap": "Must parse '€49.99' and '49,99 EUR', skip unknown currency, dedupe."},
@@ -295,13 +327,27 @@ questions = [
     {"q": "How many users are from the United States?",
      "expected": int((true_country == "United States").sum()),
      "trap": "Normalize 'USA', 'US', 'u.s.a.', 'United States'; dedupe users first. User 1004 (India vs Canada conflict) does not affect this count."},
+    {"q": "How many distinct currency units appear in orders.csv prices (ignore blank/unlabeled amounts)?",
+     "expected": int(len({c for i, c in enumerate(o_currency) if i not in order_no_currency_idx})),
+     "trap": "Must parse ISO codes AND symbols (£, ₹, ¥, CA$, A$, $, €). Do not stop at USD/EUR."},
+    {"q": "How many blue shirts did we sell?",
+     "expected": REFUSE,
+     "trap": "No color column exists."},
 ]
 
 
 # ----------------------------------------------------------------------
 # Validate traps exist, then write files (no cleaning!)
 # ----------------------------------------------------------------------
-assert orders_out.price.str.contains("USD|\\$").any() and orders_out.price.str.contains("EUR|€").any()
+price_blob = " ".join(orders_out.price.astype(str)) + " " + " ".join(inventory_out.price.astype(str))
+assert "USD" in price_blob or "$" in price_blob
+assert "EUR" in price_blob or "€" in price_blob
+assert any(t in price_blob for t in ("GBP", "£"))
+assert any(t in price_blob for t in ("INR", "₹"))
+assert any(t in price_blob for t in ("JPY", "¥"))
+assert any(t in price_blob for t in ("CAD", "CA$"))
+assert any(t in price_blob for t in ("AUD", "A$"))
+assert len(set(inv_currency)) >= 5
 assert manifest["orders.csv"]["exact_duplicate_rows"] >= 10
 assert manifest["orders.csv"]["blank_order_dates"] >= 10
 assert manifest["orders.csv"]["ambiguous_slash_dates"] > 0

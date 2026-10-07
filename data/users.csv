@@ -1,0 +1,46 @@
+user_id,name,email,signup_date,country
+1040,Customer 40,,"Aug 18, 2024",US
+1026,Customer 26,customer26@example.com,23/08/2024,US
+1027,Customer 27,customer27@example.com,05/01/2024,IN
+1032,Customer 32,customer32@example.com,23/03/2024,IN
+1036,Customer 36,customer36@example.com,2024-01-24 00:00:00,India
+1014,Customer 14,,04/10/2024,India
+1005,Customer 05,customer05@example.com,07-Jun-2024,France
+1013,Customer 13,customer13@example.com,2024-09-09,germany
+1009,Customer 09,customer09@example.com,03/10/2024,germany
+1004,Customer 04,customer04@example.com,"Jun 09, 2024",india 
+1007,Customer 07,customer07@example.com,2024-02-01,India
+1025,Customer 25,customer25@example.com,,germany
+1033,Customer 33,customer33@example.com,02/03/2024,IN
+1020,Customer 20,customer20@example.com,13/06/2024,Germany
+1018,Customer 18,,2024-02-16 00:00:00,FR
+1014,Customer 14,,04/10/2024,India
+1025,Customer 25,customer25@example.com,,germany
+1016,Customer 16,customer16@example.com,"Oct 13, 2024",DE
+1010,Customer 10,customer10@example.com,"Feb 04, 2024",india 
+1017,Customer 17,customer17@example.com,06-Jul-2024,USA
+1038,Customer 38,customer38@example.com,,india 
+1032,Customer 32,customer32@example.com,23/03/2024,IN
+1028,Customer 28,customer28@example.com,"Oct 27, 2024",FR
+1001,Customer 01,customer01@example.com,2024-02-02,US
+1031,Customer 31,customer31@example.com,2024-06-06,germany
+1030,Customer 30,customer30@example.com,2024-06-10 00:00:00,United States
+1006,Customer 06,customer06@example.com,2024-11-09 00:00:00,germany
+1012,Customer 12,customer12@example.com,2024-12-22 00:00:00,USA
+1034,Customer 34,customer34@example.com,"Jul 21, 2024",DE
+1002,Customer 02,,09/10/2024,FR
+1020,Customer 20,customer20@example.com,13/06/2024,Germany
+1022,Customer 22,customer22@example.com,"May 15, 2024",France
+1003,Customer 03,customer03@example.com,08/02/2024,France
+1035,Customer 35,customer35@example.com,11-Nov-2024,IN
+1024,Customer 24,customer24@example.com,2024-12-04 00:00:00,IN
+1037,Customer 37,customer37@example.com,2024-11-09,DE
+1011,Customer 11,customer11@example.com,11-Jul-2024,DE
+1023,Customer 23,customer23@example.com,07-Mar-2024,France
+1019,Customer 19,customer19@example.com,2024-11-02,DE
+1004,Customer 04,customer04@example.com,"Jun 09, 2024",Canada
+1021,Customer 21,customer21@example.com,07/01/2024,United States
+1008,Customer 08,customer08@example.com,,germany
+1015,Customer 15,customer15@example.com,,u.s.a.
+1029,Customer 29,customer29@example.com,,FR
+1039,Customer 39,customer39@example.com,04/11/2024,Germany
