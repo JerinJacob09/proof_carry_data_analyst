@@ -74,7 +74,7 @@ def _render_attempts(attempts) -> None:
 
 st.title("🧾 Proof-Carrying Data Analyst")
 st.caption(
-    "Upload CSVs, PDFs, Word documents, or graph images, ask a question in plain language, and review the result and generated code. "
+    "Upload CSVs, PDFs, or graph images, ask a question in plain language, and review the result and generated code. "
     "Questions the data cannot answer are refused."
 )
 if not _resolve_api_key():
@@ -93,7 +93,7 @@ upload_left, upload_center, upload_right = st.columns([1, 2, 1])
 with upload_center:
     with st.container(border=True):
         st.subheader("1. Add your data and documents")
-        st.caption("Upload CSV tables, PDFs, Word documents (.docx), or graph images. PDFs and Word files become searchable text tables; graph images are read by the configured vision model.")
+        st.caption("Upload CSV tables, PDFs, or graph images. PDFs become searchable text tables; graph images are read by the configured vision model.")
         uploaded = st.file_uploader(
             "Upload files",
             type=[ext.lstrip(".") for ext in sorted(SUPPORTED_EXTENSIONS)],

@@ -10,11 +10,9 @@ from pathlib import Path
 
 import pandas as pd
 
-SUPPORTED_EXTENSIONS = {".csv", ".pdf", ".docx", ".png", ".jpg", ".jpeg", ".webp"}
+SUPPORTED_EXTENSIONS = {".csv", ".pdf", ".png", ".jpg", ".jpeg", ".webp"}
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 MAX_IMAGE_COUNT = 3
-
-
 def _safe_name(filename: str, fallback: str) -> str:
     stem = Path(filename).stem
     safe = re.sub(r"[^A-Za-z0-9_-]+", "_", stem).strip("_") or fallback
@@ -68,7 +66,7 @@ def stage_uploads(
     api_key: str | None = None,
     provider: str | None = None,
 ) -> list[str]:
-    """Stage CSVs and turn PDF/DOCX/image uploads into proof-readable CSVs."""
+    """Stage CSVs and turn PDF/image uploads into proof-readable CSVs."""
     destination.mkdir(parents=True, exist_ok=True)
     from agent.llm_prompt import _resolve_api_key, _resolve_provider
 
@@ -128,15 +126,6 @@ def stage_uploads(
                     "location": str(page_number),
                     "content": text,
                 })
-        elif ext == ".docx":
-            from docx import Document
-
-            document = Document(BytesIO(data))
-            text = "\n".join(p.text for p in document.paragraphs if p.text.strip())
-            for table_number, table in enumerate(document.tables, start=1):
-                table_text = "\n".join(" | ".join(cell.text for cell in row.cells) for row in table.rows)
-                text += f"\n[Table {table_number}]\n{table_text}"
-            doc_rows.append({"source": Path(original_name).name, "kind": "Word text", "location": "document", "content": text.strip()})
         else:
             image_count += 1
             if image_count > MAX_IMAGE_COUNT:

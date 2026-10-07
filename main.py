@@ -66,7 +66,7 @@ async def analyze(
         for i, f in enumerate(files or [])
     ]
     if not uploads and not selected_builtins:
-        return {"ok": False, "error": "Upload a CSV, PDF, DOCX, or image, or select a predefined CSV file."}
+        return {"ok": False, "error": "Upload a CSV, PDF, or image, or select a predefined CSV file."}
 
     key = (api_key or "").strip() or None
     mdl = (model or "").strip() or None

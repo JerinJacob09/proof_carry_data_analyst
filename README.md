@@ -30,7 +30,7 @@ Start the app:
 python -m streamlit run app.py
 ```
 
-The deployed demo is available at https://proof-carry-data-analyst.onrender.com/. The main page supports multiple CSV, PDF, Word (`.docx`), and graph image (`.png`, `.jpg`, `.jpeg`, `.webp`) uploads. Add files in batches, remove individual uploads, or remove all uploads; files with repeated names are kept as separate inputs. Each file is limited to 20 MB, and up to 3 graph images can be included at a time. PDFs and Word documents are converted into source-document CSV tables; chart images and scanned/chart PDF pages are read by the configured vision model. It uses the sample tables by default; uploading files switches the samples off. The data preview is under “Preview loaded tables.”
+The deployed demo is available at https://proof-carry-data-analyst.onrender.com/. The main page supports multiple CSV, PDF, and graph image (`.png`, `.jpg`, `.jpeg`, `.webp`) uploads. Add files in batches, remove individual uploads, or remove all uploads; files with repeated names are kept as separate inputs. Each file is limited to 20 MB, and up to 3 graph images can be included at a time. PDFs are converted into source-document CSV tables; chart images and scanned/chart PDF pages are read by the configured vision model. It uses the sample tables by default; uploading files switches the samples off. The data preview is under “Preview loaded tables.”
 
 ## Evaluation
 
