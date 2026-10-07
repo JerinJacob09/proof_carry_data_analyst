@@ -16,17 +16,8 @@ import tempfile
 from pathlib import Path
 
 import streamlit as st
-from sandbox.executor import describe_isolation
 
-from agent.llm_prompt import (
-    DEFAULT_GEMINI_MODEL,
-    DEFAULT_GROQ_MODEL,
-    REFUSAL,
-    _resolve_api_key,
-    _resolve_model,
-    _resolve_provider,
-    _sniff_provider_from_key,
-)
+from agent.llm_prompt import REFUSAL, _resolve_api_key
 from agent.react_loop import run_react
 from agent.schema import DATA_DIR, DEFAULT_TABLES, build_schema_context, load_frames
 
@@ -77,50 +68,13 @@ def _render_attempts(attempts) -> None:
             st.divider()
 
 
-with st.sidebar:
-    st.header("Setup")
-    st.caption(
-        "If Render already asked for GROQ_API_KEY, you are done — leave this blank. "
-        "Otherwise paste a Groq key here (starts with gsk_). Never commit keys."
-    )
-    provider_options = ["auto", "groq", "gemini"]
-    provider_choice = st.selectbox("LLM provider", provider_options, index=0)
-    sidebar_key = st.text_input("API key (optional override)", type="password")
-    default_provider = _resolve_provider(None if provider_choice == "auto" else provider_choice)
-    default_model = _resolve_model(None, default_provider)
-    # Key the widget on provider_choice so Streamlit resets the value whenever
-    # the provider changes instead of holding the stale model name from the
-    # previous provider.
-    model = st.text_input("Model", value=default_model, key=f"model_{provider_choice}")
-    st.caption(f"Defaults: Groq `{DEFAULT_GROQ_MODEL}` · Gemini `{DEFAULT_GEMINI_MODEL}`")
-
-    provider_arg = None if provider_choice == "auto" else provider_choice
-    effective_key = sidebar_key.strip() or _resolve_api_key(None, provider_arg) or ""
-    # Sniff the actual provider the key belongs to so the status message is accurate
-    # even when the dropdown and the key prefix disagree.
-    if effective_key:
-        sniffed = _sniff_provider_from_key(effective_key)
-        display_provider = sniffed or default_provider
-        if sniffed and provider_arg and sniffed != provider_arg:
-            st.warning(
-                f"Key looks like a **{sniffed}** key but provider is set to **{provider_arg}**. "
-                f"Will use **{sniffed}** automatically."
-            )
-        else:
-            st.success(f"API key found ({display_provider}).")
-    else:
-        st.warning("No API key yet. Paste a Groq key above, or set GROQ_API_KEY on Render.")
-    
-    _level, _msg = describe_isolation()
-    {"ok": st.success, "refused": st.error, "degraded": st.warning}[_level](_msg)
-
 st.title("🧾 Proof-Carrying Data Analyst")
 st.caption(
     "Upload CSV files, ask a question in plain language, and review the result and generated code. "
     "Questions the data cannot answer are refused."
 )
-if not (sidebar_key.strip() or _resolve_api_key(None, provider_arg)):
-    st.info("To run an analysis, add your Groq or Gemini API key in the Setup section in the sidebar.")
+if not _resolve_api_key():
+    st.info("This demo needs an API key configured in the environment (`GROQ_API_KEY` or `GEMINI_API_KEY`).")
 
 if "_csv_uploader_n" not in st.session_state:
     st.session_state._csv_uploader_n = 0
@@ -228,8 +182,8 @@ with run_center:
     run = st.button("3. Analyze CSVs", type="primary", use_container_width=True, disabled=not question.strip())
 
 if run:
-    if not (sidebar_key.strip() or _resolve_api_key(None, provider_arg)):
-        st.error("Missing API key. Use the sidebar, `.env`, or Streamlit Secrets.")
+    if not _resolve_api_key():
+        st.error("No API key is configured. Add `GROQ_API_KEY` or `GEMINI_API_KEY` to the app environment and restart it.")
         st.stop()
 
     with st.spinner("Reason + Act: generating proof code and running it in the sandbox..."):
@@ -237,9 +191,6 @@ if run:
             question.strip(),
             schema_context,
             working_dir=str(work),
-            api_key=sidebar_key.strip() or None,
-            model=model.strip() or None,
-            provider=provider_arg,
         )
 
     _render_attempts(result.attempts)

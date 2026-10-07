@@ -23,6 +23,17 @@ def _safe_csv_name(name: str, i: int) -> str:
     return f"{clean}.csv"
 
 
+def _form_flag(value: str | bool, default: bool = True) -> bool:
+    if isinstance(value, bool):
+        return value
+    s = str(value or "").strip().lower()
+    if s in {"1", "true", "on", "yes"}:
+        return True
+    if s in {"0", "false", "off", "no"}:
+        return False
+    return default
+
+
 @app.get("/api/health")
 def health():
     return {"ok": True}
@@ -34,16 +45,17 @@ async def analyze(
     files: list[UploadFile] = File(default=[]),
     api_key: str = Form(""),
     model: str = Form(""),
-    auto_retry: bool = Form(True),
+    auto_retry: str = Form("true"),
     provider: str = Form(""),
-    use_builtin: bool = Form(True),
+    use_builtin: str = Form("true"),
 ):
     question = (question or "").strip()
     if not question:
         return {"ok": False, "error": "Question is empty."}
 
+    builtin = _form_flag(use_builtin, True)
     csvs = [f for f in (files or []) if (f.filename or "").lower().endswith(".csv")]
-    if not csvs and not use_builtin:
+    if not csvs and not builtin:
         return {"ok": False, "error": "Upload at least one .csv file, or enable the built-in messy CSVs."}
 
     key = (api_key or "").strip() or None
@@ -55,7 +67,7 @@ async def analyze(
         frames: dict = {}
 
         # Stage built-in CSVs first so uploads can selectively override them.
-        if use_builtin and not csvs:
+        if builtin and not csvs:
             for name in DEFAULT_TABLES:
                 src = DATA_DIR / name
                 if src.is_file():
@@ -88,7 +100,7 @@ async def analyze(
             api_key=key,
             model=mdl,
             provider=prov,
-            max_retries=3 if auto_retry else 0,
+            max_retries=3 if _form_flag(auto_retry, True) else 0,
         )
 
         attempts = [

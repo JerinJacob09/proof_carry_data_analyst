@@ -309,3 +309,55 @@ def test_unique_orders_after_dedupe():
     unique = orders.drop_duplicates(subset=["order_id"]).shape[0]
     assert unique == orders["order_id"].nunique()
     assert unique < len(orders)
+
+
+def test_form_flag_parsing():
+    from main import _form_flag
+
+    assert _form_flag(True) is True
+    assert _form_flag(False) is False
+    assert _form_flag("true") is True
+    assert _form_flag("True") is True
+    assert _form_flag("1") is True
+    assert _form_flag("on") is True
+    assert _form_flag("yes") is True
+
+    assert _form_flag("false") is False
+    assert _form_flag("False") is False
+    assert _form_flag("0") is False
+    assert _form_flag("off") is False
+    assert _form_flag("no") is False
+
+    assert _form_flag("", default=True) is True
+    assert _form_flag("", default=False) is False
+    assert _form_flag(None, default=True) is True
+    assert _form_flag(None, default=False) is False
+
+
+def test_analyze_auto_retry_controls_max_retries():
+    from unittest.mock import MagicMock, patch
+    from fastapi.testclient import TestClient
+    from main import app
+
+    client = TestClient(app)
+    with patch("main.run_react") as mock_react:
+        mock_react.return_value = MagicMock(
+            attempts=[], refused=False, answer="ok", code="", parsed_json=None
+        )
+
+        # Unchecked in UI sends string "false"
+        res = client.post(
+            "/api/analyze",
+            data={"question": "count rows", "auto_retry": "false", "use_builtin": "true"},
+        )
+        assert res.status_code == 200
+        assert mock_react.call_args.kwargs["max_retries"] == 0
+
+        # Checked in UI sends string "true"
+        res = client.post(
+            "/api/analyze",
+            data={"question": "count rows", "auto_retry": "true", "use_builtin": "true"},
+        )
+        assert res.status_code == 200
+        assert mock_react.call_args.kwargs["max_retries"] == 3
+
