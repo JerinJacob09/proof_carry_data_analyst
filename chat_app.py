@@ -9,7 +9,7 @@ from pathlib import Path
 import streamlit as st
 from sandbox.executor import describe_isolation
 
-from agent.llm_prompt import REFUSAL, _resolve_api_key, _resolve_model, _resolve_provider
+from agent.llm_prompt import REFUSAL, _resolve_api_key, _resolve_model, _resolve_provider, _sniff_provider_from_key
 from agent.react_loop import MAX_RETRIES, run_react
 from agent.schema import DATA_DIR, DEFAULT_TABLES, build_schema_context, load_frames
 
@@ -45,9 +45,24 @@ with st.sidebar:
     sidebar_key = st.text_input("API key (optional)", type="password")
     provider_choice = st.selectbox("Provider", ["auto", "groq", "gemini"])
     provider_arg = None if provider_choice == "auto" else provider_choice
-    model = st.text_input("Model", value=_resolve_model(None, _resolve_provider(provider_arg)))
+    # Key the widget on provider_choice so Streamlit resets the value whenever
+    # the provider changes instead of holding the stale model name from the
+    # previous provider.
+    model = st.text_input(
+        "Model",
+        value=_resolve_model(None, _resolve_provider(provider_arg)),
+        key=f"model_{provider_choice}",
+    )
     if sidebar_key.strip() or _resolve_api_key(None, provider_arg):
-        st.success("API key found.")
+        effective_key = sidebar_key.strip() or _resolve_api_key(None, provider_arg) or ""
+        sniffed = _sniff_provider_from_key(effective_key)
+        if sniffed and provider_arg and sniffed != provider_arg:
+            st.warning(
+                f"Key looks like a **{sniffed}** key but provider is set to **{provider_arg}**. "
+                f"Will use **{sniffed}** automatically."
+            )
+        else:
+            st.success("API key found.")
     else:
         st.warning("Paste a Groq key above, or set GROQ_API_KEY on Render.")
 

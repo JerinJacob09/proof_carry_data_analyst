@@ -25,6 +25,7 @@ from agent.llm_prompt import (
     _resolve_api_key,
     _resolve_model,
     _resolve_provider,
+    _sniff_provider_from_key,
 )
 from agent.react_loop import run_react
 from agent.schema import DATA_DIR, DEFAULT_TABLES, build_schema_context, load_frames
@@ -87,13 +88,26 @@ with st.sidebar:
     sidebar_key = st.text_input("API key (optional override)", type="password")
     default_provider = _resolve_provider(None if provider_choice == "auto" else provider_choice)
     default_model = _resolve_model(None, default_provider)
-    model = st.text_input("Model", value=default_model)
+    # Key the widget on provider_choice so Streamlit resets the value whenever
+    # the provider changes instead of holding the stale model name from the
+    # previous provider.
+    model = st.text_input("Model", value=default_model, key=f"model_{provider_choice}")
     st.caption(f"Defaults: Groq `{DEFAULT_GROQ_MODEL}` · Gemini `{DEFAULT_GEMINI_MODEL}`")
 
     provider_arg = None if provider_choice == "auto" else provider_choice
     effective_key = sidebar_key.strip() or _resolve_api_key(None, provider_arg) or ""
+    # Sniff the actual provider the key belongs to so the status message is accurate
+    # even when the dropdown and the key prefix disagree.
     if effective_key:
-        st.success(f"API key found ({default_provider}).")
+        sniffed = _sniff_provider_from_key(effective_key)
+        display_provider = sniffed or default_provider
+        if sniffed and provider_arg and sniffed != provider_arg:
+            st.warning(
+                f"Key looks like a **{sniffed}** key but provider is set to **{provider_arg}**. "
+                f"Will use **{sniffed}** automatically."
+            )
+        else:
+            st.success(f"API key found ({display_provider}).")
     else:
         st.warning("No API key yet. Paste a Groq key above, or set GROQ_API_KEY on Render.")
     

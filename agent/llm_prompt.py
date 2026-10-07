@@ -285,6 +285,15 @@ def _call_gemini(api_key: str, model: str, user_prompt: str) -> str:
     return getattr(response, "text", None) or ""
 
 
+def _sniff_provider_from_key(key: str) -> str | None:
+    """Return the provider implied by a key's prefix, or None if unrecognised."""
+    if key.startswith("gsk_"):
+        return "groq"
+    if key.startswith("AIza"):
+        return "gemini"
+    return None
+
+
 def generate_code(
     user_question: str,
     schema_context: str = "",
@@ -295,12 +304,21 @@ def generate_code(
 ) -> str:
     """Generate proof-carrying pandas code (or canonical refusal)."""
     resolved_provider = _resolve_provider(provider)
+
+    # First pass: resolve the key against whatever provider we think we have.
     resolved_key = _resolve_api_key(api_key, resolved_provider)
-    if resolved_key and not provider:
-        if resolved_key.startswith("gsk_"):
-            resolved_provider = "groq"
-        elif resolved_key.startswith("AIza"):
-            resolved_provider = "gemini"
+
+    # Auto-correct provider from key prefix.  This runs unconditionally so an
+    # explicit-but-wrong dropdown selection (e.g. provider="gemini" + gsk_ key)
+    # is also fixed.  If the prefix disagrees with the explicit provider we
+    # trust the key — the key is the ground truth for which service to call.
+    if resolved_key:
+        sniffed = _sniff_provider_from_key(resolved_key)
+        if sniffed and sniffed != resolved_provider:
+            resolved_provider = sniffed
+            # Re-resolve the key in case the first pass fetched the wrong env var.
+            resolved_key = _resolve_api_key(api_key, resolved_provider)
+
     if not resolved_key:
         raise RuntimeError(
             "No LLM API key found. Set GROQ_API_KEY or GEMINI_API_KEY in a local .env, "
