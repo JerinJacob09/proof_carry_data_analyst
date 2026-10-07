@@ -1,6 +1,6 @@
 """Proof-Carrying Data Analyst
 
-Question → LLM writes pandas proof code → isolated sandbox → verified result.
+Question → LLM writes pandas proof code → isolated sandbox → result accepted only after a successful `pd.read_csv` of a staged CSV.
 If the sandbox crashes, the traceback is fed back to the model (up to 3 retries).
 Trick questions the schema cannot support are refused with `I cannot determine this.`
 

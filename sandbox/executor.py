@@ -166,6 +166,8 @@ class SandboxResult:
     execution_time_seconds: Optional[float] = None
     # Kernel/OS layers that were active for this run, e.g. ("rlimits", "landlock", "seccomp").
     isolation: Tuple[str, ...] = field(default_factory=tuple)
+    csv_files_read: Tuple[str, ...] = field(default_factory=tuple)
+    verified: bool = False
 
 
 @dataclass
@@ -427,7 +429,10 @@ class ExecutionSandbox:
 
     def _to_result(self, out: _Outcome, timeout: float) -> SandboxResult:
         layers: Tuple[str, ...] = ()
+        csv_files_read: Tuple[str, ...] = ()
         for event in out.events:
+            if event.get("event") == "csv_reads":
+                csv_files_read = tuple(event.get("files") or ())
             if event.get("event") in {"ready", "error", "probe"}:
                 layers = tuple(event.get("applied") or ())
                 if event.get("missing") and not self.strict:
@@ -473,9 +478,15 @@ class ExecutionSandbox:
                 False, out.stdout, stderr, error_type=error_type,
                 execution_time_seconds=out.elapsed, isolation=layers,
             )
+        if not csv_files_read:
+            return SandboxResult(
+                True, out.stdout,
+                "VerificationError: generated code completed without successfully reading a provided CSV with pd.read_csv. Load the relevant CSV data before printing an answer.",
+                error_type="VerificationError", execution_time_seconds=out.elapsed, isolation=layers,
+            )
         return SandboxResult(
             True, out.stdout, out.stderr, parsed_json=self._extract_proof_json(out.stdout),
-            execution_time_seconds=out.elapsed, isolation=layers,
+            execution_time_seconds=out.elapsed, isolation=layers, csv_files_read=csv_files_read, verified=True,
         )
 
     @staticmethod

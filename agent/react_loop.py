@@ -19,6 +19,7 @@ class Attempt:
     success: bool
     stdout: str
     stderr: str
+    csv_files_read: tuple[str, ...] = ()
 
 
 @dataclass
@@ -98,13 +99,14 @@ def run_react(
         att = Attempt(
             n=n,
             code=last_code,
-            success=res.success,
+            success=res.success and res.verified,
             stdout=res.stdout,
-            stderr=res.stderr,
+            stderr=res.stderr or ("VerificationError: no provided CSV was successfully read with pd.read_csv." if res.success and not res.verified else ""),
+            csv_files_read=res.csv_files_read,
         )
         attempts.append(att)
 
-        if res.success:
+        if res.success and res.verified:
             printed = (res.stdout or "").strip()
             return AgentResult(
                 ok=True,
