@@ -8,7 +8,7 @@
       3071,
       3084
     ],
-    "blank_order_dates": 11,
+    "blank_order_dates": 10,
     "ambiguous_slash_dates": 18,
     "orphan_user_ids": [
       9991,
@@ -64,9 +64,9 @@
     "conflicting_duplicate_user_ids": [
       1004
     ],
-    "blank_signup_dates": 6,
+    "blank_signup_dates": 5,
     "ambiguous_slash_dates": 9,
-    "blank_emails": 5,
+    "blank_emails": 4,
     "country_spelling_variants": {
       "United States": [
         "United States",
@@ -94,7 +94,7 @@
     "rows": 23,
     "unique_product_ids": 20,
     "exact_duplicate_rows": 3,
-    "blank_restock_dates": 4,
+    "blank_restock_dates": 3,
     "ambiguous_slash_dates": 3,
     "products_missing_currency": [
       2006,

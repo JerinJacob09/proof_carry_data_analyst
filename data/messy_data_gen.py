@@ -261,7 +261,7 @@ manifest = {
         "unique_order_ids": int(orders_out.order_id.nunique()),
         "exact_duplicate_rows": int(orders_out.duplicated().sum()),
         "conflicting_duplicate_order_ids": sorted(conflict_orders.order_id.astype(int).tolist()),
-        "blank_order_dates": int(orders_out.order_date.eq("").sum()),
+        "blank_order_dates": len(order_blanks),   # count from pre-duplication base
         "ambiguous_slash_dates": count_ambiguous(orders_out.order_date),
         "orphan_user_ids": [9991, 9992, 9993, 9994],
         "orphan_product_ids": [2997, 2998, 2999],
@@ -278,19 +278,19 @@ manifest = {
         "unique_user_ids": int(users_out.user_id.nunique()),
         "exact_duplicate_rows": int(users_out.duplicated().sum()),
         "conflicting_duplicate_user_ids": conflict_user.user_id.astype(int).tolist(),
-        "blank_signup_dates": int(users_out.signup_date.eq("").sum()),
+        "blank_signup_dates": len(signup_blanks),  # count from pre-duplication base
         "ambiguous_slash_dates": count_ambiguous(users_out.signup_date),
-        "blank_emails": int(users_out.email.eq("").sum()),
+        "blank_emails": len(missing_email_idx),    # count from pre-duplication base
         "country_spelling_variants": country_variants,
     },
     "inventory.csv": {
         "rows": len(inventory_out),
         "unique_product_ids": int(inventory_out.product_id.nunique()),
         "exact_duplicate_rows": int(inventory_out.duplicated().sum()),
-        "blank_restock_dates": int(inventory_out.last_restock_date.eq("").sum()),
+        "blank_restock_dates": len(restock_blanks),         # count from pre-duplication base
         "ambiguous_slash_dates": count_ambiguous(inventory_out.last_restock_date),
         "products_missing_currency": [int(product_ids[i]) for i in no_currency_products],
-        "products_missing_stock": [int(product_ids[i]) for i in missing_stock_idx],
+        "products_missing_stock": [int(product_ids[i]) for i in missing_stock_idx],  # 2 unique products
         "products_zero_stock": [int(product_ids[i]) for i in [2, 9]],
     },
     "data_notes.md": "Every statement contradicts the CSVs (currency, date format, orphan users, zero stock).",
@@ -363,6 +363,18 @@ assert manifest["orders.csv"]["exact_duplicate_rows"] >= 10
 assert manifest["orders.csv"]["blank_order_dates"] >= 10
 assert manifest["orders.csv"]["ambiguous_slash_dates"] > 0
 assert orders_out.order_id.duplicated().sum() > orders_out.duplicated().sum()  # conflicting dupes exist
+# Blank counts in the manifest must equal the pre-duplication source counts, not the
+# inflated counts from *_out DataFrames (which double-count blanks in duplicated rows).
+assert manifest["orders.csv"]["blank_order_dates"] == len(order_blanks), \
+    f"blank_order_dates {manifest['orders.csv']['blank_order_dates']} != {len(order_blanks)}"
+assert manifest["users.csv"]["blank_signup_dates"] == len(signup_blanks), \
+    f"blank_signup_dates {manifest['users.csv']['blank_signup_dates']} != {len(signup_blanks)}"
+assert manifest["users.csv"]["blank_emails"] == len(missing_email_idx), \
+    f"blank_emails {manifest['users.csv']['blank_emails']} != {len(missing_email_idx)}"
+assert manifest["inventory.csv"]["blank_restock_dates"] == len(restock_blanks), \
+    f"blank_restock_dates {manifest['inventory.csv']['blank_restock_dates']} != {len(restock_blanks)}"
+assert manifest["inventory.csv"]["products_missing_stock"] == [int(product_ids[i]) for i in missing_stock_idx], \
+    "products_missing_stock mismatch"
 
 OUT.mkdir(exist_ok=True)
 orders_out.to_csv(OUT / "orders.csv", index=False)

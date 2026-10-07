@@ -16,8 +16,13 @@ from agent.schema import DATA_DIR, DEFAULT_TABLES, build_schema_context, load_fr
 st.set_page_config(page_title="Proof-Carrying Data Analyst", page_icon="🧾", layout="wide")
 
 
-def _workspace() -> Path:
-    dest = Path(tempfile.mkdtemp(prefix="pcda_chat_"))
+def _workspace() -> tempfile.TemporaryDirectory:
+    """Create a temp dir, copy built-in CSVs into it, and return the TemporaryDirectory
+    object.  Storing the object (not just the path string) in session state means Python
+    will call __del__ → cleanup when the session's state is garbage-collected, so the
+    directory is removed even without an explicit session-end hook."""
+    td = tempfile.TemporaryDirectory(prefix="pcda_chat_")
+    dest = Path(td.name)
     for name in DEFAULT_TABLES:
         src = DATA_DIR / name
         if src.is_file():
@@ -25,13 +30,13 @@ def _workspace() -> Path:
     notes = DATA_DIR / "data_notes.md"
     if notes.is_file():
         shutil.copy2(notes, dest / notes.name)
-    return dest
+    return td
 
 
-if "work_dir" not in st.session_state:
-    st.session_state.work_dir = str(_workspace())
+if "work_td" not in st.session_state:
+    st.session_state.work_td = _workspace()
 
-work = Path(st.session_state.work_dir)
+work = Path(st.session_state.work_td.name)
 frames = load_frames(work)
 schema = build_schema_context(work, frames)
 
