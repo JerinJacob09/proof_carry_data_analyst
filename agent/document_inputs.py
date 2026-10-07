@@ -55,7 +55,7 @@ def _image_to_text(data: bytes, mime_type: str, api_key: str, provider: str) -> 
             }
         ],
         temperature=0,
-        max_completion_tokens=2048,
+        max_completion_tokens=768,
     )
     return (result.choices[0].message.content or "").strip()
 
