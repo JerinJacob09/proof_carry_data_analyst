@@ -79,7 +79,10 @@ with st.sidebar:
     sidebar_key = st.text_input("API key (optional override)", type="password")
     default_provider = _resolve_provider(None if provider_choice == "auto" else provider_choice)
     default_model = _resolve_model(None, default_provider)
-    model = st.text_input("Model", value=default_model)
+    # Key the widget on provider_choice so Streamlit resets the value whenever
+    # the provider changes instead of holding the stale model name from the
+    # previous provider.
+    model = st.text_input("Model", value=default_model, key=f"model_{provider_choice}")
     st.caption(f"Defaults: Groq `{DEFAULT_GROQ_MODEL}` · Gemini `{DEFAULT_GEMINI_MODEL}`")
 
     provider_arg = None if provider_choice == "auto" else provider_choice

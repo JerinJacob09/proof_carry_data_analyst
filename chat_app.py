@@ -45,7 +45,14 @@ with st.sidebar:
     sidebar_key = st.text_input("API key (optional)", type="password")
     provider_choice = st.selectbox("Provider", ["auto", "groq", "gemini"])
     provider_arg = None if provider_choice == "auto" else provider_choice
-    model = st.text_input("Model", value=_resolve_model(None, _resolve_provider(provider_arg)))
+    # Key the widget on provider_choice so Streamlit resets the value whenever
+    # the provider changes instead of holding the stale model name from the
+    # previous provider.
+    model = st.text_input(
+        "Model",
+        value=_resolve_model(None, _resolve_provider(provider_arg)),
+        key=f"model_{provider_choice}",
+    )
     if sidebar_key.strip() or _resolve_api_key(None, provider_arg):
         st.success("API key found.")
     else:
