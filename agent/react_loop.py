@@ -96,6 +96,13 @@ def run_react(
             )
 
         res: SandboxResult = sandbox.run(last_code, working_dir=working_dir)
+        if res.success and res.verified:
+            replay = sandbox.run(last_code, working_dir=working_dir)
+            if not replay.success or not replay.verified or replay.stdout.strip() != res.stdout.strip():
+                res.verified = False
+                res.error_type = "VerificationError"
+                detail = replay.stderr or "the second run produced different output"
+                res.stderr = f"VerificationError: proof replay did not reproduce the answer. {detail}"
         att = Attempt(
             n=n,
             code=last_code,

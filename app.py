@@ -15,9 +15,12 @@ import shutil
 import tempfile
 from pathlib import Path
 
+import numpy as np
+import pandas as pd
 import streamlit as st
 
 from agent.llm_prompt import REFUSAL, _resolve_api_key
+from agent.proof_bundle import build_proof_bundle
 from agent.react_loop import run_react
 from agent.schema import DATA_DIR, DEFAULT_TABLES, build_schema_context, load_frames
 
@@ -59,7 +62,7 @@ def _render_attempts(attempts) -> None:
             st.markdown(f"**{label}**")
             st.code(att.code, language="python")
             if att.success:
-                st.success("Verified: read " + ", ".join(att.csv_files_read))
+                st.success("Proof replay matched · CSVs read: " + ", ".join(att.csv_files_read))
                 if att.stdout:
                     st.code(att.stdout, language="text")
             else:
@@ -222,8 +225,19 @@ if run:
     elif not result.ok:
         st.error(result.answer)
     else:
-        st.subheader("Result (CSV read verified)")
+        st.subheader("Result")
         st.code(result.answer, language="text")
         st.subheader("Proof code")
         st.code(result.code, language="python")
-        st.success("Verified: the run successfully read " + ", ".join(result.attempts[-1].csv_files_read) + ".")
+        proof_files = result.attempts[-1].csv_files_read
+        st.success("Proof replay matched. CSVs read: " + ", ".join(proof_files) + ".")
+        st.download_button(
+            "Download rerunnable proof + CSVs",
+            data=build_proof_bundle(
+                question.strip(), result.answer, result.code, proof_files, work,
+                pandas_version=pd.__version__, numpy_version=np.__version__,
+            ),
+            file_name="proof_bundle.zip",
+            mime="application/zip",
+            use_container_width=True,
+        )

@@ -40,6 +40,7 @@ import sys
 import tempfile
 import threading
 import time
+import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
@@ -78,6 +79,10 @@ _BLOCKED_CALLS = frozenset({
 _BLOCKED_ATTRS = frozenset({
     "gi_frame", "gi_code", "cr_frame", "cr_code", "ag_frame", "ag_code",
     "f_back", "f_globals", "f_locals", "f_builtins", "f_code", "tb_frame", "co_code",
+    "open", "write_text", "write_bytes", "touch", "unlink", "rename", "replace",
+    "mkdir", "makedirs", "rmdir", "removedirs", "chmod", "symlink_to", "hardlink_to",
+    "to_csv", "to_pickle", "to_parquet", "to_excel", "to_json", "to_feather",
+    "to_sql", "save", "savetxt", "savez", "savez_compressed", "dump", "write", "writelines",
 })
 
 _PATH_FUNCS = {"open", "read_csv", "read_table", "read_json", "read_excel", "read_fwf", "Path"}
@@ -154,6 +159,94 @@ def validate_user_code(code: str) -> str | None:
     if visitor.errors:
         return f"SandboxSecurityError: {'; '.join(visitor.errors[:8])}"
     return None
+
+
+def _has_data_dependent_print(code: str) -> bool:
+    """Conservatively require the sole printed answer to depend on a CSV-derived value.
+
+    This is a static data-flow guard against accidental or direct hard-coded answers;
+    it is not a proof that the calculation answers the user's question correctly.
+    """
+    try:
+        tree = ast.parse(code)
+    except SyntaxError:
+        return False
+
+    tainted: set[str] = set()
+    print_calls: list[bool] = []
+
+    def depends_on_csv(node: ast.AST) -> bool:
+        if isinstance(node, ast.Name) and node.id in tainted:
+            return True
+        if isinstance(node, ast.Call):
+            fn = node.func
+            if (
+                isinstance(fn, ast.Attribute)
+                and fn.attr == "read_csv"
+                and isinstance(fn.value, ast.Name)
+                and fn.value.id == "pd"
+            ):
+                return True
+        return any(depends_on_csv(child) for child in ast.iter_child_nodes(node))
+
+    def assigned_names(target: ast.AST) -> set[str]:
+        if isinstance(target, ast.Name):
+            return {target.id}
+        if isinstance(target, (ast.Tuple, ast.List)):
+            return set().union(*(assigned_names(item) for item in target.elts))
+        return set()
+
+    class DataFlow(ast.NodeVisitor):
+        def visit_Assign(self, node: ast.Assign) -> None:
+            tainted_value = depends_on_csv(node.value)
+            self.visit(node.value)
+            for target in node.targets:
+                names = assigned_names(target)
+                tainted.difference_update(names)
+                if tainted_value:
+                    tainted.update(names)
+
+        def visit_AnnAssign(self, node: ast.AnnAssign) -> None:
+            tainted_value = node.value is not None and depends_on_csv(node.value)
+            if node.value is not None:
+                self.visit(node.value)
+            names = assigned_names(node.target)
+            tainted.difference_update(names)
+            if tainted_value:
+                tainted.update(names)
+
+        def visit_AugAssign(self, node: ast.AugAssign) -> None:
+            tainted_value = depends_on_csv(node.target) or depends_on_csv(node.value)
+            self.visit(node.value)
+            names = assigned_names(node.target)
+            if tainted_value:
+                tainted.update(names)
+            else:
+                tainted.difference_update(names)
+
+        def visit_For(self, node: ast.For) -> None:
+            iterable_is_data = depends_on_csv(node.iter)
+            self.visit(node.iter)
+            names = assigned_names(node.target)
+            tainted.difference_update(names)
+            if iterable_is_data:
+                tainted.update(names)
+            for statement in node.body + node.orelse:
+                self.visit(statement)
+
+        def visit_Call(self, node: ast.Call) -> None:
+            if isinstance(node.func, ast.Name) and node.func.id == "print":
+                print_calls.append(
+                    len(node.args) == 1
+                    and not node.keywords
+                    and depends_on_csv(node.args[0])
+                )
+            self.generic_visit(node)
+
+    flow = DataFlow()
+    for statement in tree.body:
+        flow.visit(statement)
+    return len(print_calls) == 1 and print_calls[0]
 
 
 @dataclass
@@ -274,7 +367,15 @@ class ExecutionSandbox:
                 return SandboxResult(
                     False, "", f"SandboxInfrastructureError: {exc}", error_type="InfrastructureError"
                 )
-            return self._to_result(out, effective_timeout)
+            result = self._to_result(out, effective_timeout)
+            if result.success and result.verified and not _has_data_dependent_print(code):
+                result.verified = False
+                result.error_type = "VerificationError"
+                result.stderr = (
+                    "VerificationError: the single printed answer must be computed from a value derived "
+                    "from a provided CSV. Printing a constant or extra diagnostic output is not accepted."
+                )
+            return result
         finally:
             shutil.rmtree(private_dir, ignore_errors=True)
 
@@ -297,6 +398,8 @@ class ExecutionSandbox:
 
     def _run_child(self, cfg: dict, cwd: str, timeout: float) -> _Outcome:
         status_r = status_w = None
+        status_token = uuid.uuid4().hex
+        cfg = {**cfg, "status_token": status_token}
         popen_kwargs: dict[str, Any] = {}
         if _IS_POSIX:
             status_r, status_w = os.pipe()
@@ -327,17 +430,45 @@ class ExecutionSandbox:
             except (BrokenPipeError, OSError):
                 pass
 
-        def drain(stream, buf: bytearray) -> None:
+        def drain(stream, buf: bytearray, parse_status: bool = False) -> None:
+            pending = b""
+            marker = f"\x1ePCDA:{status_token}:".encode("ascii")
+
+            def handle_line(line: bytes) -> None:
+                if parse_status and line.startswith(marker):
+                    try:
+                        event = json.loads(line[len(marker):].decode("utf-8"))
+                    except (UnicodeDecodeError, ValueError):
+                        return
+                    events.append(event)
+                    if event.get("event") == "ready":
+                        state["ready_at"] = time.monotonic()
+                    return
+                if len(buf) + len(line) + 1 > self.max_output_bytes:
+                    buf.extend(line[:max(0, self.max_output_bytes - len(buf))])
+                    state["overflow"] = True
+                    return
+                buf.extend(line + b"\n")
+
             try:
+                read_chunk = stream.read1 if parse_status and hasattr(stream, "read1") else stream.read
                 while True:
-                    chunk = stream.read(65536)
+                    chunk = read_chunk(65536)
                     if not chunk:
-                        return
-                    if len(buf) + len(chunk) > self.max_output_bytes:
-                        buf.extend(chunk[: max(0, self.max_output_bytes - len(buf))])
-                        state["overflow"] = True
-                        return
-                    buf.extend(chunk)
+                        break
+                    if parse_status:
+                        pending += chunk
+                        while b"\n" in pending:
+                            line, pending = pending.split(b"\n", 1)
+                            handle_line(line)
+                    else:
+                        if len(buf) + len(chunk) > self.max_output_bytes:
+                            buf.extend(chunk[: max(0, self.max_output_bytes - len(buf))])
+                            state["overflow"] = True
+                            return
+                        buf.extend(chunk)
+                if parse_status and pending:
+                    handle_line(pending)
             except (OSError, ValueError):
                 return
 
@@ -366,7 +497,9 @@ class ExecutionSandbox:
         threads = [
             threading.Thread(target=feed_stdin, daemon=True),
             threading.Thread(target=drain, args=(proc.stdout, out_buf), daemon=True),
-            threading.Thread(target=drain, args=(proc.stderr, err_buf), daemon=True),
+            threading.Thread(
+                target=drain, args=(proc.stderr, err_buf, not _IS_POSIX), daemon=True
+            ),
             threading.Thread(target=read_status, daemon=True),
         ]
         for t in threads:
@@ -382,15 +515,9 @@ class ExecutionSandbox:
                 ready_at = state["ready_at"]
                 if ready_at is not None:
                     deadline = ready_at + timeout
-                elif status_r is not None:
-                    # POSIX, waiting for "ready" event before the user code starts.
+                elif status_r is not None or not _IS_POSIX:
                     deadline = started + self.startup_timeout
-                else:
-                    # Non-POSIX: no readiness signal.  The timeout budget covers
-                    # interpreter start-up AND user code.  Use the larger of
-                    # startup_timeout and timeout so a very short test timeout
-                    # still gets the full startup grace, but a normal timeout
-                    # is not inflated by startup_timeout on top.
+                else:  # Fallback if the readiness channel could not be created.
                     deadline = started + max(self.startup_timeout, timeout)
                 if now > deadline:
                     timed_out = True

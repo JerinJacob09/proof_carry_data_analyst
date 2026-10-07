@@ -5,9 +5,11 @@ from pathlib import Path
 import pandas as pd
 
 from agent.llm_prompt import REFUSAL, SYSTEM_PROMPT, _normalize_output, _strip_markdown
+from agent.proof_bundle import build_proof_bundle
 from agent.react_loop import MAX_RETRIES, run_react
 from agent.schema import DATA_DIR, build_schema_context
-from sandbox.executor import ExecutionSandbox
+from evaluate_golden import matches_expected
+from sandbox.executor import ExecutionSandbox, SandboxResult, _has_data_dependent_print
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -47,15 +49,46 @@ def test_sandbox_does_not_verify_hard_coded_output(tmp_path):
     assert res.error_type == "VerificationError"
 
 
+def test_sandbox_rejects_hard_coded_output_after_reading_csv(tmp_path):
+    (tmp_path / "orders.csv").write_text("order_id\n1\n2\n", encoding="utf-8")
+    res = ExecutionSandbox().run(
+        "orders = pd.read_csv('orders.csv')\nprint(100)",
+        working_dir=str(tmp_path),
+    )
+    assert res.success
+    assert not res.verified
+    assert res.error_type == "VerificationError"
+    assert "derived from a provided CSV" in res.stderr
+
+
+def test_dataflow_check_rejects_hard_coded_answer_after_csv_read():
+    code = "orders = pd.read_csv('orders.csv')\nprint(100)"
+    assert not _has_data_dependent_print(code)
+
+
+def test_dataflow_check_accepts_aggregate_from_csv():
+    code = (
+        "orders = pd.read_csv('orders.csv')\n"
+        "unique_order_count = orders['order_id'].nunique()\n"
+        "print(unique_order_count)"
+    )
+    assert _has_data_dependent_print(code)
+
+
+def test_dataflow_check_rejects_multiple_or_debug_prints():
+    code = "orders = pd.read_csv('orders.csv')\nprint('starting')\nprint(orders.shape[0])"
+    assert not _has_data_dependent_print(code)
+
+
 def test_sandbox_reads_csv_with_python_string_storage(tmp_path):
     (tmp_path / "strings.csv").write_text("label\nhello\n", encoding="utf-8")
     res = ExecutionSandbox().run(
-        "df = pd.read_csv('strings.csv')\nprint(pd.options.mode.string_storage)",
+        "df = pd.read_csv('strings.csv')\nprint(str(df['label'].iloc[0]) + ':' + pd.options.mode.string_storage)",
         working_dir=str(tmp_path),
     )
     assert res.success, res.stderr
     assert res.verified
-    assert res.stdout.strip() == "python"
+    assert res.stdout.strip() == "hello:python"
 
 
 def test_sandbox_rejects_os_import(tmp_path, monkeypatch):
@@ -191,6 +224,23 @@ def test_react_retries_hard_coded_answer_until_csv_is_read(tmp_path):
     assert result.attempts[1].csv_files_read == ("t.csv",)
 
 
+def test_react_rejects_answer_that_does_not_replay_identically(tmp_path):
+    class UnstableSandbox:
+        outputs = iter(("10", "11"))
+
+        def run(self, code, working_dir=None):
+            return SandboxResult(
+                True, next(self.outputs), "", csv_files_read=("t.csv",), verified=True
+            )
+
+    result = run_react(
+        "q", "schema", str(tmp_path), generate=lambda *args, **kwargs: "print(1)",
+        sandbox=UnstableSandbox(), max_retries=0,
+    )
+    assert not result.ok
+    assert "did not reproduce" in result.error
+
+
 def test_react_refuses_without_executing(tmp_path):
     def fake_generate(question, schema_context="", error_history=None, **kwargs):
         return REFUSAL
@@ -241,6 +291,41 @@ def test_prompt_refuses_conflicting_duplicate_values_instead_of_choosing_first()
     assert "count distinct non-missing identifiers" in SYSTEM_PROMPT
     assert "If a conflict exists on a column that IS used" in SYSTEM_PROMPT
     assert "Prefer the first occurrence" not in SYSTEM_PROMPT
+
+
+def test_golden_evaluator_compares_answers_and_refusals():
+    assert matches_expected("100", False, 100)
+    assert matches_expected("I cannot determine this.", True, REFUSAL)
+    assert not matches_expected("100", True, 100)
+    assert not matches_expected("I cannot determine this.", False, REFUSAL)
+
+
+def test_proof_bundle_can_be_extracted_and_rerun(tmp_path):
+    import io
+    import json
+    import subprocess
+    import sys
+    import zipfile
+
+    work = tmp_path / "inputs"
+    work.mkdir()
+    (work / "orders.csv").write_text("order_id\n1\n2\n", encoding="utf-8")
+    code = "orders = pd.read_csv('orders.csv')\nprint(orders['order_id'].nunique())"
+    archive = build_proof_bundle(
+        "How many unique orders?", "2", code, ("orders.csv",), work,
+        pandas_version=pd.__version__, numpy_version=__import__("numpy").__version__,
+    )
+    extracted = tmp_path / "proof"
+    with zipfile.ZipFile(io.BytesIO(archive)) as bundle:
+        bundle.extractall(extracted)
+    metadata = json.loads((extracted / "proof.json").read_text(encoding="utf-8"))
+    assert metadata["expected_output"] == "2"
+    assert (extracted / "orders.csv").is_file()
+    rerun = subprocess.run(
+        [sys.executable, "proof.py"], cwd=extracted, capture_output=True,
+        text=True, check=True, timeout=20,
+    )
+    assert rerun.stdout.strip() == "2"
 
 
 def _parse_unit(val: str) -> str | None:

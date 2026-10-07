@@ -30,16 +30,22 @@ import sys
 EXIT_HARDENING_FAILED = 70
 
 _STATUS_FD: int | None = None
+_STATUS_TOKEN: str | None = None
 _CSV_READS: set[str] = set()
 
 
 def _status(obj: dict) -> None:
-    if _STATUS_FD is None:
-        return
-    try:
-        os.write(_STATUS_FD, (json.dumps(obj) + "\n").encode("utf-8"))
-    except OSError:
-        pass
+    line = json.dumps(obj)
+    if _STATUS_FD is not None:
+        try:
+            os.write(_STATUS_FD, (line + "\n").encode("utf-8"))
+        except OSError:
+            pass
+    elif _STATUS_TOKEN:
+        # Windows does not support pass_fds. Use a private, per-run marker on stderr;
+        # the parent strips it and turns it back into a status event.
+        sys.stderr.write(f"\n\x1ePCDA:{_STATUS_TOKEN}:{line}\n")
+        sys.stderr.flush()
 
 
 # --------------------------------------------------------------------------- #
@@ -628,9 +634,10 @@ def _run_user_code(code: str, cfg: dict, namespace_modules: dict, workdir: str) 
 
 
 def main() -> int:
-    global _STATUS_FD
+    global _STATUS_FD, _STATUS_TOKEN
     cfg = json.loads(sys.stdin.buffer.read().decode("utf-8"))
     _STATUS_FD = cfg.get("status_fd")
+    _STATUS_TOKEN = cfg.get("status_token")
     for stream in (sys.stdout, sys.stderr):
         try:
             stream.reconfigure(encoding="utf-8", errors="replace")

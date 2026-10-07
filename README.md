@@ -1,126 +1,67 @@
-"""Proof-Carrying Data Analyst
+# Proof-Carrying Data Analyst
 
-Question → LLM writes pandas proof code → isolated sandbox → result accepted only after a successful `pd.read_csv` of a staged CSV.
-If the sandbox crashes, the traceback is fed back to the model (up to 3 retries).
-Trick questions the schema cannot support are refused with `I cannot determine this.`
+A hackathon demo that answers questions about messy CSV tables with generated pandas code. The code runs in an isolated sandbox, and accepted answers include the code and a downloadable bundle containing the CSV inputs.
 
-## Stack
+## Run locally
 
-* **LLM engine:** Groq. Keys stay in a local `.env` or Streamlit Secrets in the cloud — never in git.
-* **Frontend & hosting:** Streamlit UI on [Render](https://render.com), deployed from GitHub (free Community plan) for an instant demo.
-
-## Setup
+Use Python 3.11 for the closest match to the Render deployment.
 
 ```powershell
-cd proof_carry_data_analyst
-pip install -r requirements.txt
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
 python data/messy_data_gen.py
 ```
 
-## API keys (never commit)
+Create a local `.env` file with one provider key:
 
-API keys are read from the app environment, a local `.env`, or Streamlit Secrets.
-
-Local `.env` (gitignored):
-
-```
-GROQ_API_KEY=gsk_your_real_key_here
-# or
-# GEMINI_API_KEY=your_gemini_key_here
-# LLM_PROVIDER=groq
-# GROQ_MODEL=openai/gpt-oss-120b
+```text
+GROQ_API_KEY=your_groq_key
+# or GEMINI_API_KEY=your_gemini_key
 ```
 
-Get a Groq key at https://console.groq.com/keys
-
-## Run the Streamlit demo (hackathon entry)
+Start the app:
 
 ```powershell
 python -m streamlit run app.py
 ```
 
-Chat-style UI:
+The main page supports multiple CSV uploads. It uses the sample tables by default; uploading files switches the samples off. The data preview is under “Preview loaded tables.”
+
+## Evaluation
+
+Run the local tests:
 
 ```powershell
-python -m streamlit run chat_app.py
+python -m pytest
 ```
 
-Built-in tables: `data/orders.csv`, `data/users.csv`, `data/inventory.csv`.
-They contain duplicate IDs, mixed units (USD, EUR, GBP, INR, JPY, CAD, AUD — not just two currencies), and missing/ambiguous dates.
-There is **no color column** — “How many blue shirts did we sell?” must be refused.
-
-## Host on Render (GitHub → Community Cloud)
-
-Blueprint (`render.yaml`) starts `app.py` on Render’s `$PORT`.
-
-1. Push this repo to GitHub.
-2. [Render Dashboard](https://dashboard.render.com) → **New** → **Blueprint** → this repo (or **Web Service** + Python).
-3. Environment → add `GROQ_API_KEY` (same value as local `.env`; never commit it).
-4. Deploy. The public URL is the instant demo.
-
-Start command if you create the service by hand:
-
-```
-streamlit run app.py --server.port $PORT --server.address 0.0.0.0 --server.headless true
-```
-
-### Optional: Streamlit Community Cloud
-
-Same app, secrets instead of Render env vars: https://share.streamlit.io → Main file `app.py` → App settings → Secrets (see `.streamlit/secrets.toml.example`).
-
-## Optional FastAPI site
+Run the live agent against every question and expected answer in `data/test_questions.json`:
 
 ```powershell
-python -m uvicorn main:app --reload
+python evaluate_golden.py
 ```
 
-<<<<<<< HEAD
-Default model is `openai/gpt-oss-120b` (override with `GROQ_MODEL`).
-`llama-3.3-70b-versatile` was retired by Groq in Aug 2026, so don't use it.
+The live evaluation requires `GROQ_API_KEY` or `GEMINI_API_KEY`. It returns a nonzero exit code if any answer or refusal does not match the golden set.
 
-## Run — Streamlit (alternative UI)
+## What verification checks
 
-```powershell
-# NOTE: use python -m (bare `streamlit` is not on PATH for user installs)
-python -m streamlit run app.py       # CSV uploader flow
-python -m streamlit run chat_app.py  # chat demo with mock messy data + retry trace
-```
+The sandbox confirms a provided CSV was successfully read. A static data-flow check also requires exactly one printed answer expression that references a value derived from `pd.read_csv`. The accepted code is then run a second time, and its output must match the first run. This catches direct hard-coded output, missing CSV reads, runtime errors, and nondeterministic results.
 
-Then: upload 1+ CSVs (or use the built-in mock data in `chat_app.py`) → type a question → run.
+These checks establish that the displayed code runs reproducibly and uses a CSV-derived value. They do not prove the calculation is mathematically correct for every possible question; use the golden evaluation and inspect the downloadable proof when correctness matters.
 
-## Test
+On success, “Download rerunnable proof + CSVs” creates a ZIP with `proof.py`, the CSV files the code read, the expected output, and pinned pandas/numpy versions. Extract it, install `requirements-proof.txt`, and run `python proof.py` to reproduce the answer.
 
-```powershell
-# 1. Key wiring (no API cost) — should print True + model name
-python -c "from agent.llm_prompt import _resolve_api_key, _resolve_model; print(bool(_resolve_api_key()), _resolve_model())"
-# .env must stay local — should print ".gitignore:2:.env" and NOT appear in status
-git check-ignore -v .env
-git status --short
+## Included challenge data
 
-# 2. Sandbox only (no API cost) — should print True '4'
-python -c "from sandbox.executor import ExecutionSandbox; r=ExecutionSandbox().run('print(2+2)'); print(r.success, repr(r.stdout))"
+The built-in data is generated by `data/messy_data_gen.py` and includes `orders.csv`, `users.csv`, `inventory.csv`, and contradictory `data_notes.md`. Traps cover duplicate and conflicting identifiers, mixed currencies, ambiguous and missing dates, orphan foreign keys, missing values, and a nonexistent color attribute.
 
-# 3. Live Groq call (uses key) — should return runnable python with print(...)
-python -c "from agent.llm_prompt import generate_code; print(generate_code('What is 2+2?', 'No tables needed, just print 2+2.'))"
-```
+## Deploy on Render
 
-If step 3 says `GROQ_API_KEY is not set`, check that your local `.env` is loading or configure the key in the hosting provider's environment settings.
+The `render.yaml` Blueprint starts `app.py`.
 
-## Host on Streamlit Cloud (`xxx.streamlit.app`)
+1. Create a Render Blueprint from this repository.
+2. Set `GROQ_API_KEY` or `GEMINI_API_KEY` in the service environment.
+3. Deploy and open the service URL.
 
-1. Push latest to GitHub.
-2. Go to share.streamlit.io → New app → pick repo/branch.
-3. Main file: `app.py` (or `chat_app.py` for the chat demo — only one; never `main.py`, that's the FastAPI backend).
-4. Add `GROQ_API_KEY` or `GEMINI_API_KEY` to the app's Secrets / environment settings.
-=======
-Open http://127.0.0.1:8000
->>>>>>> 5581d8b6b08f06243031c676fa6d1661f22801df
-
-## How it fits together
-
-* `agent/llm_prompt.py` — Groq (default) or Gemini. Forces raw pandas code or exactly `I cannot determine this.`
-* `agent/react_loop.py` — Reason + Act: generate → sandbox → feed traceback back, up to 3 retries.
-* `sandbox/executor.py` — isolated subprocess, 10s timeout, secrets stripped from the child env.
-* `app.py` / `chat_app.py` — Streamlit UIs (Render / Streamlit Cloud).
-* `render.yaml` — Render Community Cloud Blueprint from GitHub.
-* `data/messy_data_gen.py` — regenerates the rigged CSVs and `test_questions.json`.
+The page reads the key from the environment; there is no key or provider setup panel in the demo UI. The optional FastAPI backend can be started locally with `python -m uvicorn main:app --reload`.

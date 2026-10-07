@@ -120,6 +120,7 @@ PYTHON RULES:
 - Use these provided names directly; do not import pandas again or import helper modules such as io/StringIO.
 - CSV files live in the working directory. Load them with pd.read_csv('orders.csv') using the filenames from SCHEMA CONTEXT. Do not invent table or column names.
 - Compute the answer from the data and print it with print(...). Never hard-code the final number.
+- Print exactly once, with exactly one argument whose value is computed from CSV-derived values. Do not print constants or debug output.
 - Keep code self-contained, deterministic, top-to-bottom. No input(), plots, or network.
 
 MESSY DATA — CLEAN BEFORE YOU AGGREGATE:
@@ -129,7 +130,7 @@ The CSVs are rigged. Your code must actively handle these traps:
 - First remove exact duplicate rows with drop_duplicates().
 - A repeated identifier can represent either a duplicate or conflicting records. Never choose the first/last row arbitrarily and never use drop_duplicates(subset=[id]) to resolve conflicts.
 - For a count of unique entities, count distinct non-missing identifiers; conflicting attributes do not change that count.
-- Before aggregating, filtering, or joining by a repeated identifier, compare the duplicate records on every column relevant to the question. If a conflict exists on a column that IS used by the aggregation (e.g. price, status when filtering by status, quantity when summing quantity) and the data gives no authoritative resolution rule, output exactly: I cannot determine this.
+- Before aggregating, filtering, or joining by a repeated identifier, compare the duplicate records on every column relevant to the question. If a conflict could change the answer, output exactly: I cannot determine this when there is no authoritative resolution rule. If a conflict exists on a column that IS used by the aggregation (e.g. price, status when filtering by status, quantity when summing quantity), it can change the answer.
 - Exception: if the conflicting column is NOT used anywhere in the aggregation and every column that IS used agrees across all duplicate rows, you may deduplicate on the identifier. Document the agreement as an assert, e.g. assert (df.groupby('order_id')['quantity'].nunique() == 1).all().
 
 2) MIXED UNITS IN ONE COLUMN
