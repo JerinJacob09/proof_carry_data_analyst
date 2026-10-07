@@ -6,7 +6,6 @@ from pathlib import Path
 
 import pandas as pd
 from fastapi import FastAPI, File, Form, UploadFile
-from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from agent.llm_prompt import REFUSAL
@@ -101,13 +100,11 @@ async def analyze(
         }
 
 
-if WEB_DIR.is_dir():
-    app.mount("/", StaticFiles(directory=str(WEB_DIR), html=True), name="web")
-
-
 @app.get("/", include_in_schema=False)
 def root():
-    index = WEB_DIR / "index.html"
-    if index.is_file():
-        return FileResponse(str(index))
+    """Fallback used only when web/ does not exist (no StaticFiles mount)."""
     return {"ok": True, "hint": "Frontend not built yet. Use POST /api/analyze."}
+
+
+if WEB_DIR.is_dir():
+    app.mount("/", StaticFiles(directory=str(WEB_DIR), html=True), name="web")
