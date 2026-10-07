@@ -61,7 +61,10 @@ async def analyze(
     selected_builtins = tuple(
         name for name in DEFAULT_TABLES if name in set(builtin_files) & allowed_builtins
     ) if explicit_selection else (DEFAULT_TABLES if _form_flag(use_builtin, True) else ())
-    uploads = {Path(f.filename or f"upload{i}").name: await f.read() for i, f in enumerate(files or [])}
+    uploads = [
+        (Path(f.filename or f"upload{i}").name, await f.read())
+        for i, f in enumerate(files or [])
+    ]
     if not uploads and not selected_builtins:
         return {"ok": False, "error": "Upload a CSV, PDF, DOCX, or image, or select a predefined CSV file."}
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import re
+from collections.abc import Iterable, Mapping
 from io import BytesIO
 from pathlib import Path
 
@@ -61,7 +62,7 @@ def _image_to_text(data: bytes, mime_type: str, api_key: str, provider: str) -> 
 
 
 def stage_uploads(
-    uploads: dict[str, bytes],
+    uploads: Mapping[str, bytes] | Iterable[tuple[str, bytes]],
     destination: Path,
     *,
     api_key: str | None = None,
@@ -78,7 +79,8 @@ def stage_uploads(
     staged: list[str] = []
     used_names: set[str] = set()
 
-    for original_name, data in uploads.items():
+    upload_items = uploads.items() if isinstance(uploads, Mapping) else uploads
+    for original_name, data in upload_items:
         ext = Path(original_name).suffix.lower()
         if ext not in SUPPORTED_EXTENSIONS:
             raise ValueError(f"Unsupported file type: {Path(original_name).name}")

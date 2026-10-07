@@ -435,6 +435,21 @@ def test_form_flag_parsing():
     assert _form_flag(None, default=False) is False
 
 
+def test_stage_uploads_preserves_duplicate_filenames(tmp_path):
+    from agent.document_inputs import stage_uploads
+
+    staged = stage_uploads(
+        [
+            ("report.csv", b"value\nfirst\n"),
+            ("report.csv", b"value\nsecond\n"),
+        ],
+        tmp_path,
+    )
+    assert staged == ["report.csv", "report_2.csv"]
+    assert pd.read_csv(tmp_path / staged[0])["value"].tolist() == ["first"]
+    assert pd.read_csv(tmp_path / staged[1])["value"].tolist() == ["second"]
+
+
 def test_analyze_auto_retry_controls_max_retries():
     from unittest.mock import MagicMock, patch
     from fastapi.testclient import TestClient

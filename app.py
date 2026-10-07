@@ -99,12 +99,21 @@ with upload_center:
             type=[ext.lstrip(".") for ext in sorted(SUPPORTED_EXTENSIONS)],
             accept_multiple_files=True,
             key=f"csv_tables_{st.session_state._csv_uploader_n}",
-            help="Files with the same name replace each other.",
+            help="Select several files at once, then use Add more files to include another batch.",
         )
         if uploaded:
             saved = dict(st.session_state._saved_uploads)
+            batch_names: dict[str, int] = {}
             for f in uploaded:
-                saved[Path(f.name).name] = f.getvalue()
+                filename = Path(f.name).name
+                count = batch_names.get(filename.casefold(), 0) + 1
+                batch_names[filename.casefold()] = count
+                path = Path(filename)
+                suffix = max(2, count)
+                while filename in saved:
+                    filename = f"{path.stem} ({suffix}){path.suffix}"
+                    suffix += 1
+                saved[filename] = f.getvalue()
             st.session_state._saved_uploads = saved
             for table in DEFAULT_TABLES:
                 st.session_state[f"include_{Path(table).stem}"] = False
@@ -112,9 +121,17 @@ with upload_center:
             st.rerun()
 
         if st.session_state._saved_uploads:
-            names = ", ".join(sorted(st.session_state._saved_uploads))
-            st.success(f"Uploaded: {names}")
-            if st.button("Remove uploaded files", use_container_width=True):
+            st.caption(f"{len(st.session_state._saved_uploads)} uploaded file(s)")
+            for name in sorted(st.session_state._saved_uploads):
+                file_col, remove_col = st.columns([5, 1])
+                file_col.write(name)
+                if remove_col.button("Remove", key=f"remove_upload_{name}", use_container_width=True):
+                    saved = dict(st.session_state._saved_uploads)
+                    saved.pop(name, None)
+                    st.session_state._saved_uploads = saved
+                    st.session_state._csv_uploader_n += 1
+                    st.rerun()
+            if st.button("Remove all uploaded files", use_container_width=True):
                 st.session_state._saved_uploads = {}
                 st.session_state._csv_uploader_n += 1
                 st.rerun()
