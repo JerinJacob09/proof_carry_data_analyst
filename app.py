@@ -15,6 +15,7 @@ import tempfile
 from pathlib import Path
 
 import streamlit as st
+from sandbox.executor import describe_isolation
 
 from agent.llm_prompt import (
     DEFAULT_GEMINI_MODEL,
@@ -87,6 +88,9 @@ with st.sidebar:
         st.success(f"API key found ({default_provider}).")
     else:
         st.warning("No API key yet. Paste a Groq key above, or set GROQ_API_KEY on Render.")
+    
+    _level, _msg = describe_isolation()
+    {"ok": st.success, "refused": st.error, "degraded": st.warning}[_level](_msg)
 
     use_builtin = st.checkbox("Use built-in messy CSVs (orders / users / inventory)", value=True)
     uploaded = st.file_uploader("Or upload CSV table(s)", type=["csv"], accept_multiple_files=True)
