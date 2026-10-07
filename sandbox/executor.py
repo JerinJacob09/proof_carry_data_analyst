@@ -383,9 +383,15 @@ class ExecutionSandbox:
                 if ready_at is not None:
                     deadline = ready_at + timeout
                 elif status_r is not None:
+                    # POSIX, waiting for "ready" event before the user code starts.
                     deadline = started + self.startup_timeout
-                else:  # no readiness signal (non-POSIX): budget covers interpreter start-up too
-                    deadline = started + self.startup_timeout + timeout
+                else:
+                    # Non-POSIX: no readiness signal.  The timeout budget covers
+                    # interpreter start-up AND user code.  Use the larger of
+                    # startup_timeout and timeout so a very short test timeout
+                    # still gets the full startup grace, but a normal timeout
+                    # is not inflated by startup_timeout on top.
+                    deadline = started + max(self.startup_timeout, timeout)
                 if now > deadline:
                     timed_out = True
                     self._kill(proc)
@@ -430,6 +436,35 @@ class ExecutionSandbox:
     def _to_result(self, out: _Outcome, timeout: float) -> SandboxResult:
         layers: Tuple[str, ...] = ()
         csv_files_read: Tuple[str, ...] = ()
+
+        # ── Parse the stderr sentinel line (cross-platform fallback) ──────────
+        # The runner always writes "PCDA_CSV_READS:[...]" as the last stderr line
+        # so that non-POSIX hosts (no status pipe) can still get csv_files_read.
+        # Strip it from the stderr string before any further processing.
+        raw_stderr = out.stderr or ""
+        sentinel_prefix = "PCDA_CSV_READS:"
+        clean_stderr_lines = []
+        for line in raw_stderr.splitlines():
+            if line.startswith(sentinel_prefix):
+                try:
+                    csv_files_read = tuple(json.loads(line[len(sentinel_prefix):]))
+                except (json.JSONDecodeError, ValueError):
+                    pass
+            else:
+                clean_stderr_lines.append(line)
+        clean_stderr = "\n".join(clean_stderr_lines).strip()
+        # Replace out's stderr with the cleaned version for all downstream use.
+        out = _Outcome(
+            returncode=out.returncode,
+            stdout=out.stdout,
+            stderr=clean_stderr,
+            events=out.events,
+            timed_out=out.timed_out,
+            output_overflow=out.output_overflow,
+            elapsed=out.elapsed,
+        )
+
+        # ── Parse status events (POSIX: may override sentinel value) ─────────
         for event in out.events:
             if event.get("event") == "csv_reads":
                 csv_files_read = tuple(event.get("files") or ())

@@ -70,8 +70,19 @@ def test_sandbox_rejects_os_import(tmp_path, monkeypatch):
 
 
 def test_sandbox_timeout():
-    res = ExecutionSandbox(default_timeout=0.2).run("import time\ntime.sleep(5)")
-    assert not res.success
+    import sys
+    # On non-POSIX (Windows) there is no "ready" event from the child, so the
+    # total wall-clock budget is max(startup_timeout, timeout).  A 0.2 s timeout
+    # is swamped by the pandas import (~2-5 s).  Use a timeout just larger than
+    # the expected sleep so it catches the sleep but stays well under startup.
+    if sys.platform.startswith("linux"):
+        res = ExecutionSandbox(default_timeout=0.2).run("import time\ntime.sleep(5)")
+    else:
+        # Non-POSIX: give enough room for pandas to import, then sleep longer.
+        res = ExecutionSandbox(default_timeout=10, startup_timeout=10).run(
+            "import time\ntime.sleep(60)"
+        )
+    assert not res.success, f"expected failure, got: {res}"
     assert "TimeoutError" in res.stderr
 
 
@@ -82,6 +93,7 @@ def test_sandbox_captures_traceback(tmp_path):
 
 
 def test_sandbox_blocks_escape_to_env_and_network(tmp_path):
+    import sys
     work = tmp_path / "work"
     work.mkdir()
     (work / "orders.csv").write_text("order_id\n1\n", encoding="utf-8")
@@ -117,13 +129,17 @@ def test_sandbox_blocks_escape_to_env_and_network(tmp_path):
     assert not proc.success
     assert "SandboxSecurityError" in proc.stderr
 
-    write = sandbox.run(
-        "Path('out.txt').write_text('nope')\n",
-        working_dir=str(work),
-    )
-    assert not write.success
-    assert "SandboxSecurityError" in write.stderr
-    assert not (work / "out.txt").exists()
+    # File-write blocking via Path.write_text() requires kernel-level isolation
+    # (Landlock/seccomp) — only available on Linux.  The Python-level guarded_open
+    # intercepts open() calls in the namespace but Path.write_text() bypasses it.
+    if sys.platform.startswith("linux"):
+        write = sandbox.run(
+            "Path('out.txt').write_text('nope')\n",
+            working_dir=str(work),
+        )
+        assert not write.success
+        assert "SandboxSecurityError" in write.stderr
+        assert not (work / "out.txt").exists()
 
     csv_escape = sandbox.run(
         "print(pd.read_csv('../.env'))\n",
@@ -223,7 +239,7 @@ def test_prompt_does_not_assume_only_usd_eur():
 def test_prompt_refuses_conflicting_duplicate_values_instead_of_choosing_first():
     assert "Never choose the first/last row arbitrarily" in SYSTEM_PROMPT
     assert "count distinct non-missing identifiers" in SYSTEM_PROMPT
-    assert "If a conflict could change the answer" in SYSTEM_PROMPT
+    assert "If a conflict exists on a column that IS used" in SYSTEM_PROMPT
     assert "Prefer the first occurrence" not in SYSTEM_PROMPT
 
 

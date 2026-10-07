@@ -673,6 +673,11 @@ def main() -> int:
         workdir,
     )
     _status({"event": "csv_reads", "files": sorted(_CSV_READS)})
+    # Also write CSV reads to stderr as a cross-platform sentinel line.
+    # The parent executor strips this line before surfacing stderr to the caller.
+    # This is the only mechanism available on non-POSIX hosts where the status
+    # pipe does not exist.
+    sys.stderr.write("PCDA_CSV_READS:" + json.dumps(sorted(_CSV_READS)) + "\n")
     sys.stdout.flush()
     sys.stderr.flush()
     return rc
