@@ -114,32 +114,55 @@ with st.sidebar:
     _level, _msg = describe_isolation()
     {"ok": st.success, "refused": st.error, "degraded": st.warning}[_level](_msg)
 
-    use_builtin = st.checkbox("Use built-in messy CSVs (orders / users / inventory)", value=True)
-    if "_csv_uploader_n" not in st.session_state:
-        st.session_state._csv_uploader_n = 0
-    if "_saved_uploads" not in st.session_state:
-        st.session_state._saved_uploads = {}
-    uploaded = st.file_uploader(
-        "Or upload CSV table(s)",
-        type=["csv"],
-        accept_multiple_files=True,
-        key=f"csv_tables_{st.session_state._csv_uploader_n}",
-        help="Re-upload the same filename to replace that table. Streamlit otherwise keeps the previous file.",
-    )
-    if uploaded:
-        saved = dict(st.session_state._saved_uploads)
-        for f in uploaded:
-            saved[Path(f.name).name] = f.getvalue()
-        st.session_state._saved_uploads = saved
-        st.session_state._csv_uploader_n += 1
-        st.rerun()
-
 st.title("🧾 Proof-Carrying Data Analyst")
 st.caption(
-    "Question → LLM writes pandas proof code → isolated sandbox → up to 3 self-correction retries. "
-    "Refuses trick questions the data cannot answer. Mixed units are not assumed to be only USD/EUR."
+    "Upload CSV files, ask a question in plain language, and review the result and generated code. "
+    "Questions the data cannot answer are refused."
 )
+if not (sidebar_key.strip() or _resolve_api_key(None, provider_arg)):
+    st.info("To run an analysis, add your Groq or Gemini API key in the Setup section in the sidebar.")
 
+if "_csv_uploader_n" not in st.session_state:
+    st.session_state._csv_uploader_n = 0
+if "_saved_uploads" not in st.session_state:
+    st.session_state._saved_uploads = {}
+if "use_builtin_csvs" not in st.session_state:
+    st.session_state.use_builtin_csvs = True
+
+upload_left, upload_center, upload_right = st.columns([1, 2, 1])
+with upload_center:
+    with st.container(border=True):
+        st.subheader("1. Add your CSV files")
+        st.caption("Choose one or more .csv files, or drag them into the box. Uploading switches off the sample data.")
+        uploaded = st.file_uploader(
+            "Upload CSV files",
+            type=["csv"],
+            accept_multiple_files=True,
+            key=f"csv_tables_{st.session_state._csv_uploader_n}",
+            help="Files with the same name replace each other.",
+        )
+        if uploaded:
+            saved = dict(st.session_state._saved_uploads)
+            for f in uploaded:
+                saved[Path(f.name).name] = f.getvalue()
+            st.session_state._saved_uploads = saved
+            st.session_state.use_builtin_csvs = False
+            st.session_state._csv_uploader_n += 1
+            st.rerun()
+
+        if st.session_state._saved_uploads:
+            names = ", ".join(sorted(st.session_state._saved_uploads))
+            st.success(f"Uploaded: {names}")
+            if st.button("Remove uploaded files", use_container_width=True):
+                st.session_state._saved_uploads = {}
+                st.session_state._csv_uploader_n += 1
+                st.rerun()
+
+use_builtin = st.checkbox(
+    "Use sample tables (orders, users, inventory)",
+    key="use_builtin_csvs",
+    help="Turn this off to analyze only the CSV files you uploaded.",
+)
 saved_uploads: dict[str, bytes] = st.session_state.get("_saved_uploads") or {}
 ws_key = (use_builtin, _uploads_fingerprint(saved_uploads))
 if st.session_state.get("_ws_key") != ws_key:
@@ -155,19 +178,23 @@ if st.session_state.get("_ws_key") != ws_key:
         shutil.rmtree(old_work, ignore_errors=True)
 work = Path(st.session_state.work_dir)
 
-frames = load_frames(work)
+try:
+    frames = load_frames(work)
+except Exception as exc:  # noqa: BLE001
+    st.error(f"Could not read a CSV file: {exc}")
+    st.info("Check that the file is a valid, UTF-8 encoded CSV, then remove it and upload it again.")
+    st.stop()
 if not frames:
-    st.info("Enable the built-in messy CSVs or upload at least one CSV.")
+    st.info("Upload at least one CSV above, or turn on the built-in sample tables.")
     st.stop()
 
-st.subheader("Loaded tables")
-for name, df in frames.items():
-    with st.expander(f"`{name}` — {df.shape[0]} rows, {df.shape[1]} cols", expanded=(name == "orders.csv")):
-        st.dataframe(df.head(20), use_container_width=True)
-
 schema_context = build_schema_context(work, frames)
-with st.expander("Schema context sent to the LLM"):
-    st.code(schema_context)
+with st.expander("Preview loaded tables", expanded=False):
+    for name, df in frames.items():
+        st.markdown(f"**{name}** · {df.shape[0]} rows · {df.shape[1]} columns")
+        st.dataframe(df.head(10), use_container_width=True, hide_index=True)
+with st.expander("Schema context sent to the model"):
+    st.code(build_schema_context(work, frames))
 
 examples = [
     "How many unique orders are there?",
@@ -178,16 +205,19 @@ examples = [
     "What is the total EUR revenue (price x quantity) from Completed orders with a clearly stated EUR currency, excluding orders with conflicting duplicate rows?",
     "How many distinct currency units appear in orders.csv prices (ignore blank/unlabeled amounts)?",
 ]
+st.subheader("2. Ask a question")
+picked = st.selectbox("Start with an example (optional)", ["(choose an example)"] + examples)
 typed = st.text_area(
-    "Analytical question",
-    placeholder="e.g. How many unique orders are there?",
+    "Your question",
+    placeholder="For example: How many unique orders are there?",
     height=90,
+    help="Type your own question, or leave this blank to use the example above.",
 )
-st.caption("Try a trick question such as “How many blue shirts did we sell?” — there is no color column.")
-picked = st.selectbox("Example questions", ["(pick an example)"] + examples)
 question = typed.strip() or ("" if picked.startswith("(") else picked)
 
-run = st.button("Generate proof + run", type="primary", disabled=not question.strip())
+run_left, run_center, run_right = st.columns([1, 2, 1])
+with run_center:
+    run = st.button("3. Analyze CSVs", type="primary", use_container_width=True, disabled=not question.strip())
 
 if run:
     if not (sidebar_key.strip() or _resolve_api_key(None, provider_arg)):
