@@ -1,0 +1,24 @@
+product_id,product_name,category,price,stock_quantity,last_restock_date
+2016,Product 16,Electronics,118.16 EUR,,"Dec 18, 2025"
+2010,Product 10,Clothing,104.56 EUR,0,"May 13, 2025"
+2001,Product 01,Books,214.08 GBP,73,2025-06-06
+2009,Product 09,Electronics,167.76 JPY,70,08/10/2025
+2018,Product 18,Books,"127,76 EUR",85,2025-11-28 00:00:00
+2013,Product 13,Home,10.56 CAD,80,2025-05-06
+2002,Product 02,Clothing,€62.32,27,12/06/2025
+2014,Product 14,Books,€27.06,57,13/02/2025
+2006,Product 06,Clothing,167.17,90,2025-04-21 00:00:00
+2003,Product 03,Clothing,19.28 USD,0,03/02/2025
+2012,Product 12,Electronics,"45,91 EUR",30,2025-02-01 00:00:00
+2010,Product 10,Clothing,104.56 EUR,0,"May 13, 2025"
+2004,Product 04,Books,73.94 EUR,9,"May 20, 2025"
+2005,Product 05,Books,₹76.93,44,
+2019,Product 19,Electronics,42.32 USD,1,2025-06-04
+2017,Product 17,Electronics,A$44.51,46,12-May-2025
+2007,Product 07,Electronics,141.47 USD,12,2025-09-07
+2020,Product 20,Books,€175.60,75,
+2008,Product 08,Clothing,€197.06,,19/08/2025
+2011,Product 11,Clothing,204.43,72,10-Dec-2025
+2015,Product 15,Home,181.98 USD,54,
+2020,Product 20,Books,€175.60,75,
+2007,Product 07,Electronics,141.47 USD,12,2025-09-07

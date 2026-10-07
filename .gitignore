@@ -1,4 +1,4 @@
-# Environments - GROQ_API_KEY lives in .env (never commit)
+# Environments - API keys live in .env / Streamlit Secrets (never commit)
 .env
 .venv
 env/
@@ -6,11 +6,13 @@ venv/
 ENV/
 env.bak/
 venv.bak/
+.streamlit/secrets.toml
 
 # Python cache
 __pycache__/
 *.py[cod]
 *$py.class
+.pytest_cache/
 
 # Mac/Windows system files
 .DS_Store

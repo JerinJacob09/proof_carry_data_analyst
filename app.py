@@ -1,163 +1,168 @@
-"""Streamlit interface for the Proof-Carrying Data Analyst.
+"""Streamlit UI for the Proof-Carrying Data Analyst (primary demo app).
 
-Run on any laptop:
-    pip install -r requirements.txt
-    # create .env with GROQ_API_KEY=gsk_... (gitignored)
-    streamlit run app.py
+Run:
+    python -m streamlit run app.py
 
-Key priority (handled in agent/llm_prompt.py):
-    sidebar input > env var / .env file
+Streamlit Cloud: set this file as the main file and add GROQ_API_KEY
+(or GEMINI_API_KEY) under App settings → Secrets.
 """
 
-import contextlib
-import io
-import re
-import sys
-import traceback
+from __future__ import annotations
+
+import shutil
+import tempfile
 from pathlib import Path
 
-import pandas as pd
 import streamlit as st
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+from agent.llm_prompt import (
+    DEFAULT_GEMINI_MODEL,
+    DEFAULT_GROQ_MODEL,
+    REFUSAL,
+    _resolve_api_key,
+    _resolve_model,
+    _resolve_provider,
+)
+from agent.react_loop import run_react
+from agent.schema import DATA_DIR, DEFAULT_TABLES, build_schema_context, load_frames
 
-from agent.llm_prompt import REFUSAL, _resolve_api_key, _resolve_model, generate_code
-
-st.set_page_config(page_title="Proof-Carrying Data Analyst", layout="wide")
-st.title("Proof-Carrying Data Analyst")
-st.caption("Question → Groq generates pandas proof code → executed + verified. Refuses when data is insufficient.")
-
-
-def _sanitize_var(name: str) -> str:
-    stem = Path(name).stem
-    clean = re.sub(r"\W+", "_", stem).strip("_").lower()
-    if not clean:
-        clean = "table"
-    if clean[0].isdigit():
-        clean = "t_" + clean
-    return clean
+st.set_page_config(page_title="Proof-Carrying Data Analyst", page_icon="🧾", layout="wide")
 
 
-def _build_schema_context(tables: dict) -> str:
-    lines = []
-    for var, df in tables.items():
-        lines.append(f"Table variable `{var}`: {df.shape[0]} rows x {df.shape[1]} cols")
-        for col in df.columns:
-            nulls = int(df[col].isna().sum())
-            lines.append(f"  - {col}: dtype={df[col].dtype}, nulls={nulls}, nunique={df[col].nunique(dropna=True)}")
-        # Small sample so the model sees formatting (dates, currencies, units).
-        try:
-            sample = df.head(3).to_string(index=False)
-        except Exception:
-            sample = "(sample unavailable)"
-        lines.append(f"  Sample:\n{sample}")
-    return "\n".join(lines) if lines else "(no tables loaded)"
+def _copy_default_csvs(dest: Path) -> None:
+    dest.mkdir(parents=True, exist_ok=True)
+    for name in DEFAULT_TABLES:
+        src = DATA_DIR / name
+        if src.is_file():
+            shutil.copy2(src, dest / name)
+    notes = DATA_DIR / "data_notes.md"
+    if notes.is_file():
+        shutil.copy2(notes, dest / notes.name)
 
 
-def _run_code(code: str, tables: dict):
-    """Execute generated code with DataFrames in scope. Returns (stdout, error)."""
-    buf = io.StringIO()
-    namespace = {"pd": pd, "pandas": pd, **tables}
-    try:
-        with contextlib.redirect_stdout(buf):
-            exec(code, {"__builtins__": __builtins__}, namespace)
-        return buf.getvalue().strip(), None
-    except Exception as e:  # noqa: BLE001 - show any proof failure to user
-        err = f"{type(e).__name__}: {e}"
-        return buf.getvalue().strip(), err
+def _save_uploads(files, dest: Path) -> None:
+    dest.mkdir(parents=True, exist_ok=True)
+    for f in files:
+        (dest / Path(f.name).name).write_bytes(f.getvalue())
 
 
-# ---------- Sidebar: portable key handling ----------
+def _render_attempts(attempts) -> None:
+    if not attempts:
+        return
+    retries = max(0, len(attempts) - 1)
+    title = "Agent trace: first try" if retries == 0 else f"Agent trace: {retries} retr{'y' if retries == 1 else 'ies'}"
+    with st.expander(title, expanded=len(attempts) > 1):
+        for att in attempts:
+            label = "Initial attempt" if att.n == 1 else f"Retry {att.n - 1}: self-correction"
+            st.markdown(f"**{label}**")
+            st.code(att.code, language="python")
+            if att.success:
+                st.success("Sandbox: executed successfully")
+                if att.stdout:
+                    st.code(att.stdout, language="text")
+            else:
+                st.error("Sandbox: execution failed")
+                st.code(att.stderr, language="text")
+            st.divider()
+
+
 with st.sidebar:
     st.header("Setup")
-    st.markdown("Key is **never committed**. Pick one per laptop:")
-    st.markdown("1. Paste below, 2. `.env` file (`GROQ_API_KEY=...`)")
-    sidebar_key = st.text_input("GROQ_API_KEY", value="", type="password", help="Get one at console.groq.com/keys")
-    default_model = _resolve_model()
-    model = st.text_input("GROQ_MODEL", value=default_model)
-    do_retry = st.checkbox("Auto-retry once on execution error", value=True)
+    st.caption("Keys stay in `.env` locally or Streamlit Secrets in the cloud. Never commit them.")
+    provider_options = ["auto", "groq", "gemini"]
+    provider_choice = st.selectbox("LLM provider", provider_options, index=0)
+    sidebar_key = st.text_input("API key (optional override)", type="password")
+    default_provider = _resolve_provider(None if provider_choice == "auto" else provider_choice)
+    default_model = _resolve_model(None, default_provider)
+    model = st.text_input("Model", value=default_model)
+    st.caption(f"Defaults: Groq `{DEFAULT_GROQ_MODEL}` · Gemini `{DEFAULT_GEMINI_MODEL}`")
 
-    effective_key = (sidebar_key.strip() or _resolve_api_key() or "")
+    provider_arg = None if provider_choice == "auto" else provider_choice
+    effective_key = sidebar_key.strip() or _resolve_api_key(None, provider_arg) or ""
     if effective_key:
-        st.success("API key found.")
+        st.success(f"API key found ({default_provider}).")
     else:
-        st.warning("No API key. Paste it above or add GROQ_API_KEY to .env.")
+        st.warning("No API key. Add GROQ_API_KEY / GEMINI_API_KEY to Secrets, `.env`, or the field above.")
 
-# ---------- Main: data + question ----------
-uploaded = st.file_uploader("Upload CSV table(s)", type=["csv"], accept_multiple_files=True)
+    use_builtin = st.checkbox("Use built-in messy CSVs (orders / users / inventory)", value=True)
+    uploaded = st.file_uploader("Or upload CSV table(s)", type=["csv"], accept_multiple_files=True)
 
-tables: dict = {}
-if uploaded:
-    for f in uploaded:
-        try:
-            df = pd.read_csv(f)
-            tables[_sanitize_var(f.name)] = df
-        except Exception as e:  # noqa: BLE001
-            st.error(f"Could not read {f.name}: {e}")
-
-if tables:
-    st.subheader("Loaded tables")
-    for var, df in tables.items():
-        with st.expander(f"`{var}` — {df.shape[0]} rows, {df.shape[1]} cols"):
-            st.dataframe(df.head(20), use_container_width=True)
-    schema_context = _build_schema_context(tables)
-    with st.expander("Schema context sent to Groq"):
-        st.code(schema_context)
-else:
-    st.info("Upload at least one CSV to start. Your friend does the same on their laptop — no code changes needed.")
-    schema_context = ""
-
-question = st.text_area(
-    "Analytical question",
-    placeholder="e.g. What is the average order value in USD? Refuse if currencies are mixed.",
-    height=100,
+st.title("🧾 Proof-Carrying Data Analyst")
+st.caption(
+    "Question → LLM writes pandas proof code → isolated sandbox → up to 3 self-correction retries. "
+    "Refuses trick questions the data cannot answer. Mixed units are not assumed to be only USD/EUR."
 )
 
-run = st.button("Generate proof + run", type="primary", disabled=not (tables and question.strip()))
+ws_key = (use_builtin, tuple(sorted(f.name for f in (uploaded or []))))
+if st.session_state.get("_ws_key") != ws_key:
+    work = Path(tempfile.mkdtemp(prefix="pcda_"))
+    if use_builtin:
+        _copy_default_csvs(work)
+    if uploaded:
+        _save_uploads(uploaded, work)
+    st.session_state._ws_key = ws_key
+    st.session_state.work_dir = str(work)
+work = Path(st.session_state.work_dir)
+
+frames = load_frames(work)
+if not frames:
+    st.info("Enable the built-in messy CSVs or upload at least one CSV.")
+    st.stop()
+
+st.subheader("Loaded tables")
+for name, df in frames.items():
+    with st.expander(f"`{name}` — {df.shape[0]} rows, {df.shape[1]} cols", expanded=(name == "orders.csv")):
+        st.dataframe(df.head(20), use_container_width=True)
+
+schema_context = build_schema_context(work, frames)
+with st.expander("Schema context sent to the LLM"):
+    st.code(schema_context)
+
+examples = [
+    "How many unique orders are there?",
+    "What is the total quantity of items ordered across all unique orders?",
+    "What is the total revenue in USD?",
+    "How many blue shirts did we sell?",
+    "How many orders were placed in April 2025?",
+    "What is the total EUR revenue (price x quantity) from Completed orders with a clearly stated EUR currency, excluding orders with conflicting duplicate rows?",
+    "How many distinct currency units appear in orders.csv prices (ignore blank/unlabeled amounts)?",
+]
+typed = st.text_area(
+    "Analytical question",
+    placeholder="e.g. How many unique orders are there?",
+    height=90,
+)
+st.caption("Try a trick question such as “How many blue shirts did we sell?” — there is no color column.")
+picked = st.selectbox("Example questions", ["(pick an example)"] + examples)
+question = typed.strip() or ("" if picked.startswith("(") else picked)
+
+run = st.button("Generate proof + run", type="primary", disabled=not question.strip())
 
 if run:
-    api_key = sidebar_key.strip() or None  # None -> generate_code resolves env/.env
-    if not (api_key or _resolve_api_key()):
-        st.error("Missing GROQ_API_KEY. Paste it in the sidebar or add it to `.env`.")
+    if not (sidebar_key.strip() or _resolve_api_key(None, provider_arg)):
+        st.error("Missing API key. Use the sidebar, `.env`, or Streamlit Secrets.")
         st.stop()
 
-    with st.spinner("Asking Groq for proof code..."):
-        try:
-            code = generate_code(question.strip(), schema_context, error_history=None, api_key=api_key, model=model.strip() or None)
-        except Exception as e:  # noqa: BLE001 - e.g. missing key, network
-            st.error(str(e))
-            st.stop()
+    with st.spinner("Reason + Act: generating proof code and running it in the sandbox..."):
+        result = run_react(
+            question.strip(),
+            schema_context,
+            working_dir=str(work),
+            api_key=sidebar_key.strip() or None,
+            model=model.strip() or None,
+            provider=provider_arg,
+        )
 
-    if code.strip() == REFUSAL:
+    _render_attempts(result.attempts)
+
+    if result.refused:
         st.warning(REFUSAL)
-        st.stop()
-
-    st.subheader("Generated proof code")
-    st.code(code, language="python")
-
-    stdout, error = _run_code(code, tables)
-
-    if error and do_retry:
-        st.error(f"First attempt failed: {error}")
-        with st.spinner("Retrying with error history..."):
-            try:
-                code2 = generate_code(question.strip(), schema_context, error_history=error, api_key=api_key, model=model.strip() or None)
-            except Exception as e:  # noqa: BLE001
-                st.error(str(e))
-                st.stop()
-        if code2.strip() == REFUSAL:
-            st.warning(REFUSAL)
-            st.stop()
-        st.subheader("Retried proof code")
-        st.code(code2, language="python")
-        stdout, error = _run_code(code2, tables)
-        code = code2
-
-    if error:
-        st.error(f"Execution failed: {error}")
-        with st.expander("Traceback"):
-            st.code(traceback.format_exc())
+        st.caption("The agent refused rather than hallucinating an answer from missing columns or unresolvable traps.")
+    elif not result.ok:
+        st.error(result.answer)
     else:
-        st.subheader("Verified result (program output)")
-        st.code(stdout or "(no output — code did not print anything)", language="text")
-        st.success("Code ran. Check asserts passed and the computation uses the data (no hard-coded answer).")
+        st.subheader("Verified result")
+        st.code(result.answer, language="text")
+        st.subheader("Proof code")
+        st.code(result.code, language="python")
+        st.success("Sandbox execution succeeded. The printed value is computed from the CSVs, not hard-coded.")

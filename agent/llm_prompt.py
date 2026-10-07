@@ -1,33 +1,24 @@
-"""llm_prompt.py — Person 3's LLM brain/interface.
+"""LLM interface: Groq or Gemini → raw pandas proof code or a strict refusal."""
 
-Controlled bridge between the user's analytical question and the Groq model,
-forcing the model to produce reproducible pandas proof code or explicitly
-admit the data is insufficient.
-
-Flow:
-    user_question + schema_context + error_history
-        -> System Prompt
-        -> Groq API
-        -> LLM response
-        -> clean / validate
-        -> runnable Python code  OR  "I cannot determine this."
-"""
+from __future__ import annotations
 
 import os
 import re
 from pathlib import Path
 
-from groq import Groq
+REFUSAL = "I cannot determine this."
 
-# --- Key loading: .env file only (plus explicit arg / env var) ---
-# .env is gitignored and holds GROQ_API_KEY locally. Never commit it.
+# llama-3.3-70b-versatile was retired by Groq (Aug 2026).
+DEFAULT_GROQ_MODEL = "openai/gpt-oss-120b"
+DEFAULT_GEMINI_MODEL = "gemini-2.0-flash"
+MODEL = os.getenv("GROQ_MODEL", DEFAULT_GROQ_MODEL)
+
 try:
     from dotenv import load_dotenv
 
+    load_dotenv(Path(__file__).resolve().parent.parent / ".env")
     load_dotenv()
 except Exception:
-    # Fallback: minimal manual .env parse if python-dotenv isn't installed.
-    # Looks for .env in CWD and project root (parent of agent/).
     try:
         for _candidate in (Path.cwd() / ".env", Path(__file__).resolve().parent.parent / ".env"):
             if _candidate.is_file():
@@ -45,43 +36,70 @@ except Exception:
         pass
 
 
-def _resolve_api_key(explicit: str | None = None) -> str | None:
-    """Resolve GROQ_API_KEY from explicit arg -> env var / .env file."""
-    if explicit and str(explicit).strip():
-        return str(explicit).strip()
-    key = os.getenv("GROQ_API_KEY")
-    if key and key.strip():
-        return key.strip()
+def _from_streamlit_secrets(name: str) -> str | None:
+    try:
+        import streamlit as st
+
+        secrets = getattr(st, "secrets", None)
+        if secrets is None:
+            return None
+        value = secrets.get(name)
+        if value and str(value).strip():
+            return str(value).strip()
+    except Exception:
+        return None
     return None
 
 
-def _resolve_model(explicit: str | None = None) -> str:
-    """Resolve model from explicit arg -> env var / .env file -> default."""
+def _env_or_secrets(*names: str) -> str | None:
+    for name in names:
+        value = os.getenv(name)
+        if value and value.strip():
+            return value.strip()
+        secret = _from_streamlit_secrets(name)
+        if secret:
+            return secret
+    return None
+
+
+def _resolve_api_key(explicit: str | None = None, provider: str | None = None) -> str | None:
     if explicit and str(explicit).strip():
         return str(explicit).strip()
-    env_model = os.getenv("GROQ_MODEL")
-    if env_model and env_model.strip():
-        return env_model.strip()
-    return "openai/gpt-oss-120b"
+    prov = (provider or _resolve_provider()).lower()
+    if prov == "gemini":
+        return _env_or_secrets("GEMINI_API_KEY", "GOOGLE_API_KEY")
+    return _env_or_secrets("GROQ_API_KEY")
 
-# Exact canonical refusal. No variants allowed downstream.
-REFUSAL = "I cannot determine this."
 
-# Default model (import-time snapshot for backwards compat).
-# generate_code() re-resolves at call time via _resolve_model() so
-# .env / env vars work without code edits.
-# NOTE: llama-3.3-70b-versatile was retired by Groq (Aug 2026, enterprise-only);
-# the free-tier replacement is openai/gpt-oss-120b.
-MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
+def _resolve_provider(explicit: str | None = None) -> str:
+    if explicit and str(explicit).strip():
+        return str(explicit).strip().lower()
+    env = _env_or_secrets("LLM_PROVIDER")
+    if env:
+        return env.lower()
+    if _env_or_secrets("GROQ_API_KEY"):
+        return "groq"
+    if _env_or_secrets("GEMINI_API_KEY", "GOOGLE_API_KEY"):
+        return "gemini"
+    return "groq"
+
+
+def _resolve_model(explicit: str | None = None, provider: str | None = None) -> str:
+    if explicit and str(explicit).strip():
+        return str(explicit).strip()
+    prov = (provider or _resolve_provider()).lower()
+    if prov == "gemini":
+        return _env_or_secrets("GEMINI_MODEL") or DEFAULT_GEMINI_MODEL
+    return _env_or_secrets("GROQ_MODEL") or DEFAULT_GROQ_MODEL
 
 
 SYSTEM_PROMPT = """You are a Proof-Carrying Data Analyst. You are NOT a normal chatbot.
 
 Your output will be EXECUTED and VERIFIED. The pipeline is:
 
-User -> AI -> CODE -> EXECUTION -> VERIFICATION -> Answer
+User -> AI -> CODE -> SANDBOX EXECUTION -> Answer
 
-You never answer the question directly. You write code that proves the answer.
+You never answer the question directly. You write pandas code that proves the answer.
 
 STRICT OUTPUT CONTRACT — ONLY TWO ALLOWED OUTPUTS:
 1. Raw runnable Python code, OR
@@ -89,101 +107,125 @@ STRICT OUTPUT CONTRACT — ONLY TWO ALLOWED OUTPUTS:
 I cannot determine this.
 
 FORBIDDEN outputs:
-- Explanations around code such as "Here's the code:" or "Sure! Here's the Pandas solution..."
-- Markdown formatting of any kind, including ```python fences, ``` fences, backticks, headings.
-- Apology variants such as "Sorry, I don't have enough information." or "Unable to determine from the provided data."
-- If you cannot reliably answer, output ONLY: I cannot determine this.
-- Do not mix code and refusal. It is one or the other.
+- Explanations around code such as "Here's the code:"
+- Markdown of any kind, including ```python fences
+- Apology variants. If you cannot reliably answer, output ONLY: I cannot determine this.
+- Do not mix code and refusal.
 
 PYTHON RULES:
-- Use pandas for data manipulation and analysis.
-- Assume DataFrames are already loaded with the variable/table/column names given in SCHEMA CONTEXT. Do not invent table or column names. Do not use read_csv / read_excel unless a file path is explicitly supplied in the schema context.
-- The code must compute the answer and print the final result with print(...), e.g. print(result). The printed value is what gets verified.
-- Never hard-code the final numerical answer. FORBIDDEN: result = 527.3 then print(result). REQUIRED: result = orders["amount"].mean() then print(result). The calculation must come from the data.
-- Keep code self-contained, deterministic, and runnable top-to-bottom. No user input, no plotting, no network calls.
+- pandas, numpy, json, re, and Path are already imported in the sandbox as pd, np, json, re, Path.
+- CSV files live in the working directory. Load them with pd.read_csv('orders.csv') using the filenames from SCHEMA CONTEXT. Do not invent table or column names.
+- Compute the answer from the data and print it with print(...). Never hard-code the final number.
+- Keep code self-contained, deterministic, top-to-bottom. No input(), plots, or network.
 
-MESSY DATA — INVESTIGATE FIRST, NEVER BLINDLY CALCULATE:
-Watch for: duplicate rows, missing values, inconsistent formatting, contradictory tables, ambiguous dates, different units, different currencies, duplicate identifiers, conflicting records.
-Do not blindly calculate first and investigate later. Validate before aggregating.
+MESSY DATA — CLEAN BEFORE YOU AGGREGATE:
+The CSVs are rigged. Your code must actively handle these traps:
 
-DUPLICATE HANDLING:
-- Do NOT automatically drop duplicates with drop_duplicates() unless the schema proves they are erroneous and deduplication is unambiguous.
-- If duplicate rows / duplicate identifiers could change the answer and there is no way to know which record is correct, output: I cannot determine this.
+1) DUPLICATE ORDER IDS
+- First remove exact duplicate rows with drop_duplicates().
+- A repeated identifier can represent either a duplicate or conflicting records. Never choose the first/last row arbitrarily and never use drop_duplicates(subset=[id]) to resolve conflicts.
+- For a count of unique entities, count distinct non-missing identifiers; conflicting attributes do not change that count.
+- Before aggregating, filtering, or joining by a repeated identifier, compare the duplicate records on every column relevant to the question. If a conflict could change the answer and the data gives no authoritative resolution rule, output exactly: I cannot determine this.
+- Never sum quantities/revenue over raw rows: remove exact duplicate rows first, then verify that repeated IDs have consistent values for every measure and filter used. Refuse if they do not.
 
-MISSING DATA:
-- Missing is NOT zero. NEVER do df = df.fillna(0) or fillna(0) on amounts/revenues before aggregating unless the schema explicitly defines missing as zero.
-- Determine whether missing values can legitimately be ignored. Use explicit checks such as assert not df["amount"].isna().any(). If missing values affect the requested calculation and cannot be resolved from the schema, output: I cannot determine this.
+2) MIXED UNITS IN ONE COLUMN
+- Price (and any other measure) columns can mix ANY units in the SAME column — not just USD and EUR.
+  Examples you may see: '49.99 USD', '$49.99', '€49.99', '49,99 EUR', '£12.50', 'CA$10.00',
+  'A$8.20', '₹999', '¥1500', '12.00 GBP', '10.00 INR', '15.00 JPY', '20.00 CAD', '30.00 AUD',
+  plus unknown ISO codes, unknown symbols, and bare '49.99' with NO unit.
+- Do NOT hard-code a two-currency if/else. Inspect the column and parse EVERY distinct unit.
+- PARSE amount and unit separately. Match longer tokens first so CA$/A$/NZ$/HK$/S$/US$/R$ are not treated as USD '$'.
 
-JOIN PROTECTION (multiple tables):
-- Prefer joining on IDs, never on names alone.
-- Inspect join keys first: check dtypes, uniqueness, nulls, and expected cardinality (one-to-one, one-to-many).
-- Avoid accidental many-to-many joins that silently multiply rows (e.g. 100 orders becoming 300 rows). Validate row counts before/after joins.
-- If a join key is not unique when it should be, or the correct join cannot be determined, output: I cannot determine this.
+def parse_money(val):
+    s = str(val).strip()
+    if not s or s.lower() in {'nan', 'none', 'null'}:
+        return float('nan'), None
+    symbols = [
+        ('CA$', 'CAD'), ('A$', 'AUD'), ('NZ$', 'NZD'), ('HK$', 'HKD'),
+        ('S$', 'SGD'), ('US$', 'USD'), ('R$', 'BRL'),
+        ('€', 'EUR'), ('£', 'GBP'), ('¥', 'JPY'), ('₹', 'INR'), ('₩', 'KRW'),
+        ('$', 'USD'),
+    ]
+    unit = None
+    rest = s
+    upper = s.upper()
+    for sym, code in symbols:
+        if sym in s or sym.upper() in upper:
+            unit = code
+            rest = s.replace(sym, '').replace(sym.upper(), '').replace(sym.lower(), '')
+            break
+    iso = re.search(r'(?<![A-Z])([A-Z]{3})(?![A-Z])', rest.upper())
+    if iso:
+        unit = iso.group(1)
+        rest = re.sub(iso.group(1), '', rest, count=1, flags=re.I)
+    if unit is None:
+        letters = re.findall(r'[A-Za-z]+', rest)
+        if letters:
+            unit = letters[-1].upper()  # unknown unit still counts as a unit
+            rest = re.sub(re.escape(letters[-1]), '', rest, count=1, flags=re.I)
+    num = rest.replace(' ', '')
+    if num.count(',') == 1 and num.count('.') == 0:
+        num = num.replace(',', '.')
+    else:
+        num = num.replace(',', '')
+    num = re.sub(r'[^0-9.\\-]', '', num)
+    try:
+        amount = float(num) if num not in {'', '.', '-', '-.'} else float('nan')
+    except Exception:
+        amount = float('nan')
+    return amount, unit
 
-CURRENCY CHECKS:
-- Before any sum/mean/comparison of money, explicitly validate currencies, e.g. assert df["currency"].nunique() == 1.
-- If multiple currencies appear with no conversion-rate column/table supplied, output: I cannot determine this.
-- NEVER invent exchange rates. Only convert using rates explicitly supplied in the data/schema.
+- After parsing, list the distinct units actually present (including unknown codes). Do not assume {USD, EUR}.
+- You MAY total rows whose parsed unit matches the unit the question asked for (after mapping symbols → ISO).
+- NEVER invent an exchange rate. NEVER add amounts across different units.
+- If the question needs one combined number across mixed units (e.g. "total revenue" / "who spent the most" with no FX table), output: I cannot determine this.
+- Bare numbers with no unit marker cannot be assumed to be USD or any other unit — treat the unit as missing.
 
-UNIT CHECKS:
-- Same rule for units (kg vs g, m vs cm, etc.). Validate the unit column, convert only with supplied information, otherwise output: I cannot determine this.
+3) MISSING / MESSY DATES
+- Dates appear as ISO, dd/mm/YYYY, mm/dd/YYYY, 'Apr 07, 2025', and blanks.
+- Slash dates with both parts <= 12 are AMBIGUOUS. Do not guess.
+- For questions that need a specific month/day: if any relevant date is blank or ambiguous, output: I cannot determine this.
+- For questions that do not depend on dates, ignore the date column.
+- Missing is not zero. Never fillna(0) on money or dates.
 
-DATE AMBIGUITY:
-- DO NOT GUESS date formats. 01/02/2025 could be 1 Feb or Jan 2. Use ONLY the date format specified by the data/schema.
-- Be explicit about date-range boundaries (inclusive/exclusive, timezone if given).
-- If date ambiguity could change the answer, output: I cannot determine this.
+4) OTHER TRAPS
+- Join on IDs, never names. Inspect uniqueness before merges. Orphan user_id / product_id values exist.
+- Country spellings vary (USA, US, u.s.a., United States) — normalize when counting by country.
+- data_notes.md (if present) contradicts the CSVs. Trust the CSVs.
+- Stock may be blank, zero, or text. If blanks make an exact "out of stock" count unknowable, refuse.
 
-CONTRADICTORY TABLES:
-- If two tables/sources state different values for the same fact and there is no source-of-truth rule in the schema, do not randomly pick one.
-- If the contradiction affects the requested calculation, output: I cannot determine this.
+TRICK / UNANSWERABLE QUESTIONS — STRICT REFUSAL:
+- If the question needs a column/attribute that does not exist (e.g. "How many blue shirts did we sell?" when there is no color column), output exactly: I cannot determine this.
+- If the entity is not in the data (CEO email, a year with no rows, a product line that is absent), refuse.
+- Do not hallucinate columns, colors, reasons, or future data.
+- Do not use outside knowledge.
 
-TRICK / UNANSWERABLE QUESTIONS:
-- Look for questions that sound answerable but are not: profit in 2027 when data ends in 2026, "why did sales decrease" when only sales figures exist (no causation data), revenue of a company not present in the data, columns/tables that do not exist.
-- Do not guess, extrapolate, or use outside knowledge. If the schema does not contain what the question needs, output: I cannot determine this.
-
-ASSERTIONS — VALIDATION INSIDE THE PROOF:
-- Encode every assumption as an executable assertion so the verifier can catch violations, e.g.:
-  assert df["currency"].nunique() == 1, "Currency mismatch"
-  assert df["order_id"].is_unique, "Duplicate order_id"
-  assert not df["amount"].isna().any(), "Missing amounts"
-- If an assertion could fail given the described messiness, prefer refusing over silently proceeding.
+ASSERTIONS:
+- Encode assumptions as asserts when they must hold, e.g. after parsing units:
+  units = set(df['unit'].dropna())
+  # NEVER assert units <= {USD, EUR} — other units may exist. Inspect units first.
+- If combining across more than one unit with no FX table, refuse instead of crashing.
 
 RETRIES:
-- If PREVIOUS ATTEMPT / ERROR HISTORY is supplied, the prior code failed. Fix the specific error (e.g. KeyError means wrong column name — use only columns from SCHEMA CONTEXT) while keeping all rules above.
+- If PREVIOUS ATTEMPT / ERROR HISTORY is supplied, the prior code crashed. Fix the traceback (KeyError = wrong column — use SCHEMA CONTEXT names) while keeping every rule above.
 
-Recap: output raw runnable Python code with no markdown and no commentary, ending in print(...), or output exactly: I cannot determine this."""
+Recap: raw pandas code ending in print(...), or exactly: I cannot determine this."""
 
 
 def _strip_markdown(text: str) -> str:
-    """Remove accidental Markdown code fences from model output.
-
-    Converts:
-        ```python
-        <code>
-        ```
-    into:
-        <code>
-
-    Handles multiple fenced blocks, bare ``` blocks, and
-    stray inline backticks conservatively.
-    """
     if not text:
         return ""
     cleaned = text.strip()
-    # Extract contents of all fenced blocks; if any exist, join them.
-    # Matches ```python ... ```, ```py ... ```, ``` ... ```
     fence_pattern = re.compile(r"```(?:python|py)?\s*\n?(.*?)```", re.DOTALL | re.IGNORECASE)
     blocks = fence_pattern.findall(cleaned)
     if blocks:
         cleaned = "\n".join(block.strip() for block in blocks if block.strip())
-    # Drop any leftover fence markers / language tags.
     cleaned = re.sub(r"^```(?:python|py)?\s*", "", cleaned, flags=re.IGNORECASE | re.MULTILINE)
     cleaned = cleaned.replace("```", "")
     return cleaned.strip()
 
 
 def _normalize_error_history(error_history) -> str:
-    """Normalize error_history (None | str | list) into a prompt string."""
     if error_history is None:
         return ""
     if isinstance(error_history, list):
@@ -192,77 +234,99 @@ def _normalize_error_history(error_history) -> str:
     return str(error_history).strip()
 
 
-def generate_code(user_question: str, schema_context: str = "", error_history=None, api_key: str | None = None, model: str | None = None) -> str:
-    """Generate proof-carrying pandas code (or canonical refusal) via Groq.
+def _normalize_output(cleaned: str) -> str:
+    cleaned = (cleaned or "").strip()
+    if cleaned == REFUSAL:
+        return REFUSAL
+    if REFUSAL in cleaned:
+        code_markers = ("import ", "print(", "assert ", "pd.", "DataFrame", "read_csv", "=")
+        if not any(m in cleaned for m in code_markers):
+            return REFUSAL
+        for line in cleaned.splitlines():
+            if line.strip() == REFUSAL:
+                return REFUSAL
+        if len(cleaned) < len(REFUSAL) + 100:
+            return REFUSAL
+    return cleaned
 
-    Args:
-        user_question: The user's analytical question.
-        schema_context: Table/column names, dtypes, format notes, file paths.
-        error_history: Prior failure(s) — string or list of strings, e.g.
-            "KeyError: 'revenue'". Fed back so the model can self-correct.
-        api_key: Optional explicit key (used by Streamlit sidebar input).
-            If None, resolved from env var / .env file.
-        model: Optional explicit model override. If None, resolved from
-            env var / .env file -> default.
 
-    Returns:
-        Raw runnable Python code, or exactly "I cannot determine this.".
-    """
-    resolved_key = _resolve_api_key(api_key)
-    if not resolved_key:
-        raise RuntimeError(
-            "GROQ_API_KEY is not set. Set it in the .env file in project root:\n"
-            "  GROQ_API_KEY=gsk_...  (see README)\n"
-            "Or pass it via the sidebar / request key field, or env var.\n"
-            "Get a key at https://console.groq.com/keys — never commit the real key."
-        )
-    resolved_model = _resolve_model(model)
+def _call_groq(api_key: str, model: str, user_prompt: str) -> str:
+    from groq import Groq
 
-    client = Groq(api_key=resolved_key)
-
-    errors = _normalize_error_history(error_history)
-
-    user_prompt = f"USER QUESTION:\n{user_question.strip()}\n\nSCHEMA CONTEXT:\n{(schema_context or '').strip()}"
-    if errors:
-        user_prompt += (
-            "\n\nPREVIOUS ATTEMPT(S) FAILED — ERROR HISTORY:\n"
-            f"{errors}\n"
-            "Fix the specific error above. Use only tables/columns from SCHEMA CONTEXT. "
-            "Keep the strict output contract."
-        )
-    else:
-        user_prompt += "\n\nNo previous errors. Generate the proof code on the first attempt."
-
+    client = Groq(api_key=api_key)
     response = client.chat.completions.create(
-        model=resolved_model,
+        model=model,
         messages=[
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": user_prompt},
         ],
         temperature=0,
     )
+    return response.choices[0].message.content or ""
 
-    raw = response.choices[0].message.content or ""
-    cleaned = _strip_markdown(raw).strip()
 
-    # Defensive refusal handling: single canonical refusal downstream.
-    # The model must not mix code and refusal, so any refusal phrase
-    # without real code collapses to exactly REFUSAL.
-    if cleaned == REFUSAL:
-        return REFUSAL
-    if REFUSAL in cleaned:
-        # If it looks like prose + refusal rather than executable code,
-        # normalize to the canonical refusal.
-        code_markers = ("import ", "print(", "assert ", "pd.", "DataFrame", "result", "=")
-        if not any(m in cleaned for m in code_markers):
-            return REFUSAL
-        # Mixed refusal + code is ambiguous: refuse rather than guess.
-        # But if the model echoed the refusal string inside code (e.g. in a
-        # comment/string), still treat an explicit refusal line as refusal.
-        for line in cleaned.splitlines():
-            if line.strip() == REFUSAL:
-                return REFUSAL
-        if len(cleaned) < len(REFUSAL) + 100:
-            return REFUSAL
+def _call_gemini(api_key: str, model: str, user_prompt: str) -> str:
+    try:
+        from google import genai
+    except ImportError as exc:
+        raise RuntimeError(
+            "Gemini selected but google-genai is not installed. pip install google-genai"
+        ) from exc
 
-    return cleaned
+    client = genai.Client(api_key=api_key)
+    response = client.models.generate_content(
+        model=model,
+        contents=user_prompt,
+        config={
+            "system_instruction": SYSTEM_PROMPT,
+            "temperature": 0,
+        },
+    )
+    return getattr(response, "text", None) or ""
+
+
+def generate_code(
+    user_question: str,
+    schema_context: str = "",
+    error_history=None,
+    api_key: str | None = None,
+    model: str | None = None,
+    provider: str | None = None,
+) -> str:
+    """Generate proof-carrying pandas code (or canonical refusal)."""
+    resolved_provider = _resolve_provider(provider)
+    resolved_key = _resolve_api_key(api_key, resolved_provider)
+    if resolved_key and not provider:
+        if resolved_key.startswith("gsk_"):
+            resolved_provider = "groq"
+        elif resolved_key.startswith("AIza"):
+            resolved_provider = "gemini"
+    if not resolved_key:
+        raise RuntimeError(
+            "No LLM API key found. Set GROQ_API_KEY or GEMINI_API_KEY in a local .env, "
+            "Streamlit Cloud Secrets, the sidebar, or an environment variable. "
+            "Never commit the real key."
+        )
+    resolved_model = _resolve_model(model, resolved_provider)
+
+    errors = _normalize_error_history(error_history)
+    user_prompt = (
+        f"USER QUESTION:\n{user_question.strip()}\n\n"
+        f"SCHEMA CONTEXT:\n{(schema_context or '').strip()}"
+    )
+    if errors:
+        user_prompt += (
+            "\n\nPREVIOUS ATTEMPT(S) FAILED — ERROR HISTORY:\n"
+            f"{errors}\n"
+            "Fix the specific error above. Use only files/columns from SCHEMA CONTEXT. "
+            "Keep the strict output contract."
+        )
+    else:
+        user_prompt += "\n\nNo previous errors. Generate the proof code on the first attempt."
+
+    if resolved_provider == "gemini":
+        raw = _call_gemini(resolved_key, resolved_model, user_prompt)
+    else:
+        raw = _call_groq(resolved_key, resolved_model, user_prompt)
+
+    return _normalize_output(_strip_markdown(raw))

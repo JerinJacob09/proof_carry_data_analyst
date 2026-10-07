@@ -24,7 +24,7 @@
 <body>
 <header>
   <h1>Proof-Carrying Data Analyst</h1>
-  <p>Question &rarr; Groq generates pandas proof code &rarr; sandboxed run &rarr; verified result. Refuses when data is insufficient.</p>
+  <p>Question &rarr; LLM writes pandas proof code &rarr; sandboxed run (up to 3 self-correction retries) &rarr; verified result. Refuses trick questions the data cannot answer.</p>
 </header>
 
 <fieldset>
@@ -44,9 +44,9 @@
   <legend>Data + question</legend>
   <label>CSV table(s)<br /><input id="files" type="file" accept=".csv" multiple /></label>
   <p><label>Analytical question<br />
-    <textarea id="question" placeholder="e.g. What is the average order value in USD? Refuse if currencies are mixed."></textarea>
+    <textarea id="question" placeholder="e.g. How many unique orders are there? Try: How many blue shirts did we sell?"></textarea>
   </label></p>
-  <label><input id="retry" type="checkbox" checked /> Auto-retry once on execution error</label><br /><br />
+  <label><input id="retry" type="checkbox" checked /> Self-correct up to 3 times on sandbox errors</label><br /><br />
   <button id="go">Generate proof + run</button>
   <span id="status"></span>
 </fieldset>
