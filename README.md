@@ -2,6 +2,10 @@
 
 A hackathon demo that answers questions about messy tabular and document data with generated pandas code. The code runs in an isolated sandbox, and accepted answers include the code and a downloadable bundle containing the CSV inputs.
 
+## Run our model on Render
+
+Open this link: https://proof-carry-data-analyst.onrender.com/
+
 ## Run locally
 
 Use Python 3.11 for the closest match to the Render deployment.
