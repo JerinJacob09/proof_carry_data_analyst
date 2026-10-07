@@ -97,6 +97,7 @@ async def analyze(
             "attempts": attempts,
             "result": result.answer,
             "code": result.code,
+            "parsed_json": result.parsed_json,
         }
 
 
