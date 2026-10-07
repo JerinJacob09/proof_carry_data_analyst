@@ -29,6 +29,7 @@ class AgentResult:
     code: str = ""
     attempts: list[Attempt] = field(default_factory=list)
     error: str = ""
+    parsed_json: "dict | None" = None
 
 
 def _format_error_history(attempts: list[Attempt]) -> str:
@@ -111,6 +112,7 @@ def run_react(
                 answer=printed or "(code ran but printed nothing)",
                 code=last_code,
                 attempts=attempts,
+                parsed_json=res.parsed_json,
             )
 
     last_err = attempts[-1].stderr if attempts else "unknown error"
