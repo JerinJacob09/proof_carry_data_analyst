@@ -43,19 +43,17 @@ def _copy_default_csvs(dest: Path) -> None:
         shutil.copy2(notes, dest / notes.name)
 
 
-def _save_uploads(files, dest: Path) -> None:
+def _write_saved_uploads(saved: dict[str, bytes], dest: Path) -> None:
     dest.mkdir(parents=True, exist_ok=True)
-    for f in files:
-        (dest / Path(f.name).name).write_bytes(f.getvalue())
+    for name, data in saved.items():
+        (dest / Path(name).name).write_bytes(data)
 
 
-def _uploads_fingerprint(files) -> tuple[tuple[str, str], ...]:
-    """Name + content hash so re-uploading the same filename still reloads."""
-    items = []
-    for f in files or []:
-        digest = hashlib.sha256(f.getvalue()).hexdigest()
-        items.append((Path(f.name).name, digest))
-    return tuple(sorted(items))
+def _uploads_fingerprint(saved: dict[str, bytes]) -> tuple[tuple[str, str], ...]:
+    """Name + content hash so same filename + new bytes still rebuilds the workspace."""
+    return tuple(
+        sorted((name, hashlib.sha256(data).hexdigest()) for name, data in saved.items())
+    )
 
 
 def _render_attempts(attempts) -> None:
@@ -103,7 +101,24 @@ with st.sidebar:
     {"ok": st.success, "refused": st.error, "degraded": st.warning}[_level](_msg)
 
     use_builtin = st.checkbox("Use built-in messy CSVs (orders / users / inventory)", value=True)
-    uploaded = st.file_uploader("Or upload CSV table(s)", type=["csv"], accept_multiple_files=True)
+    if "_csv_uploader_n" not in st.session_state:
+        st.session_state._csv_uploader_n = 0
+    if "_saved_uploads" not in st.session_state:
+        st.session_state._saved_uploads = {}
+    uploaded = st.file_uploader(
+        "Or upload CSV table(s)",
+        type=["csv"],
+        accept_multiple_files=True,
+        key=f"csv_tables_{st.session_state._csv_uploader_n}",
+        help="Re-upload the same filename to replace that table. Streamlit otherwise keeps the previous file.",
+    )
+    if uploaded:
+        saved = dict(st.session_state._saved_uploads)
+        for f in uploaded:
+            saved[Path(f.name).name] = f.getvalue()
+        st.session_state._saved_uploads = saved
+        st.session_state._csv_uploader_n += 1
+        st.rerun()
 
 st.title("🧾 Proof-Carrying Data Analyst")
 st.caption(
@@ -111,14 +126,15 @@ st.caption(
     "Refuses trick questions the data cannot answer. Mixed units are not assumed to be only USD/EUR."
 )
 
-ws_key = (use_builtin, _uploads_fingerprint(uploaded))
+saved_uploads: dict[str, bytes] = st.session_state.get("_saved_uploads") or {}
+ws_key = (use_builtin, _uploads_fingerprint(saved_uploads))
 if st.session_state.get("_ws_key") != ws_key:
     old_work = st.session_state.get("work_dir")
     work = Path(tempfile.mkdtemp(prefix="pcda_"))
     if use_builtin:
         _copy_default_csvs(work)
-    if uploaded:
-        _save_uploads(uploaded, work)
+    if saved_uploads:
+        _write_saved_uploads(saved_uploads, work)
     st.session_state._ws_key = ws_key
     st.session_state.work_dir = str(work)
     if old_work and Path(old_work) != work:
