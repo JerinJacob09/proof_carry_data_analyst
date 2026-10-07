@@ -38,13 +38,15 @@ def test_sandbox_runs_pandas_against_csv(tmp_path):
     assert res.stdout.strip() == "6"
 
 
-def test_sandbox_strips_secrets_from_child_env(tmp_path, monkeypatch):
+def test_sandbox_rejects_os_import(tmp_path, monkeypatch):
     monkeypatch.setenv("GROQ_API_KEY", "gsk_should_not_leak")
-    code = "import os\nprint(os.environ.get('GROQ_API_KEY'))\n"
-    res = ExecutionSandbox().run(code, working_dir=str(tmp_path))
-    assert res.success, res.stderr
+    res = ExecutionSandbox().run(
+        "import os\nprint(os.environ.get('GROQ_API_KEY'))\n",
+        working_dir=str(tmp_path),
+    )
+    assert not res.success
+    assert "SandboxSecurityError" in res.stderr
     assert "gsk_should_not_leak" not in res.stdout
-    assert res.stdout.strip() in {"None", ""}
 
 
 def test_sandbox_timeout():
@@ -57,6 +59,58 @@ def test_sandbox_captures_traceback(tmp_path):
     res = ExecutionSandbox().run("print(missing_name)", working_dir=str(tmp_path))
     assert not res.success
     assert "NameError" in res.stderr
+
+
+def test_sandbox_blocks_escape_to_env_and_network(tmp_path):
+    work = tmp_path / "work"
+    work.mkdir()
+    (work / "orders.csv").write_text("order_id\n1\n", encoding="utf-8")
+    (tmp_path / ".env").write_text("GROQ_API_KEY=gsk_leaked\n", encoding="utf-8")
+    sandbox = ExecutionSandbox()
+
+    outside = sandbox.run(
+        "print(open('../.env').read())",
+        working_dir=str(work),
+    )
+    assert not outside.success
+    assert "SandboxSecurityError" in outside.stderr
+    assert "gsk_leaked" not in outside.stdout
+
+    abs_read = sandbox.run(
+        f"print(open(r'{tmp_path / '.env'}').read())",
+        working_dir=str(work),
+    )
+    assert not abs_read.success
+    assert "SandboxSecurityError" in abs_read.stderr
+
+    net = sandbox.run(
+        "import socket\nsocket.create_connection(('127.0.0.1', 9), 1)\n",
+        working_dir=str(work),
+    )
+    assert not net.success
+    assert "SandboxSecurityError" in net.stderr
+
+    proc = sandbox.run(
+        "import subprocess\nsubprocess.run(['echo', 'hi'])\n",
+        working_dir=str(work),
+    )
+    assert not proc.success
+    assert "SandboxSecurityError" in proc.stderr
+
+    write = sandbox.run(
+        "Path('out.txt').write_text('nope')\n",
+        working_dir=str(work),
+    )
+    assert not write.success
+    assert "SandboxSecurityError" in write.stderr
+    assert not (work / "out.txt").exists()
+
+    csv_escape = sandbox.run(
+        "print(pd.read_csv('../.env'))\n",
+        working_dir=str(work),
+    )
+    assert not csv_escape.success
+    assert "SandboxSecurityError" in csv_escape.stderr
 
 
 def test_react_retries_then_succeeds(tmp_path):
