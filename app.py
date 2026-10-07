@@ -33,9 +33,9 @@ from agent.schema import DATA_DIR, DEFAULT_TABLES, build_schema_context, load_fr
 st.set_page_config(page_title="Proof-Carrying Data Analyst", page_icon="🧾", layout="wide")
 
 
-def _copy_default_csvs(dest: Path) -> None:
+def _copy_default_csvs(dest: Path, selected_tables: tuple[str, ...]) -> None:
     dest.mkdir(parents=True, exist_ok=True)
-    for name in DEFAULT_TABLES:
+    for name in selected_tables:
         src = DATA_DIR / name
         if src.is_file():
             shutil.copy2(src, dest / name)
@@ -126,14 +126,16 @@ if "_csv_uploader_n" not in st.session_state:
     st.session_state._csv_uploader_n = 0
 if "_saved_uploads" not in st.session_state:
     st.session_state._saved_uploads = {}
-if "use_builtin_csvs" not in st.session_state:
-    st.session_state.use_builtin_csvs = True
+for _table in DEFAULT_TABLES:
+    _table_key = f"include_{Path(_table).stem}"
+    if _table_key not in st.session_state:
+        st.session_state[_table_key] = True
 
 upload_left, upload_center, upload_right = st.columns([1, 2, 1])
 with upload_center:
     with st.container(border=True):
         st.subheader("1. Add your CSV files")
-        st.caption("Choose one or more .csv files, or drag them into the box. Uploading switches off the sample data.")
+        st.caption("Choose one or more .csv files, or drag them into the box. Uploading switches off the predefined files; you can reselect them below.")
         uploaded = st.file_uploader(
             "Upload CSV files",
             type=["csv"],
@@ -146,7 +148,8 @@ with upload_center:
             for f in uploaded:
                 saved[Path(f.name).name] = f.getvalue()
             st.session_state._saved_uploads = saved
-            st.session_state.use_builtin_csvs = False
+            for table in DEFAULT_TABLES:
+                st.session_state[f"include_{Path(table).stem}"] = False
             st.session_state._csv_uploader_n += 1
             st.rerun()
 
@@ -158,18 +161,23 @@ with upload_center:
                 st.session_state._csv_uploader_n += 1
                 st.rerun()
 
-use_builtin = st.checkbox(
-    "Use sample tables (orders, users, inventory)",
-    key="use_builtin_csvs",
-    help="Turn this off to analyze only the CSV files you uploaded.",
+st.caption("Choose which predefined CSV files to include:")
+table_columns = st.columns(len(DEFAULT_TABLES))
+selected_tables = tuple(
+    table for column, table in zip(table_columns, DEFAULT_TABLES)
+    if column.checkbox(
+        Path(table).stem.title(),
+        key=f"include_{Path(table).stem}",
+        help=f"Include the predefined {table} file.",
+    )
 )
 saved_uploads: dict[str, bytes] = st.session_state.get("_saved_uploads") or {}
-ws_key = (use_builtin, _uploads_fingerprint(saved_uploads))
+ws_key = (selected_tables, _uploads_fingerprint(saved_uploads))
 if st.session_state.get("_ws_key") != ws_key:
     old_work = st.session_state.get("work_dir")
     work = Path(tempfile.mkdtemp(prefix="pcda_"))
-    if use_builtin:
-        _copy_default_csvs(work)
+    if selected_tables:
+        _copy_default_csvs(work, selected_tables)
     if saved_uploads:
         _write_saved_uploads(saved_uploads, work)
     st.session_state._ws_key = ws_key
@@ -185,7 +193,7 @@ except Exception as exc:  # noqa: BLE001
     st.info("Check that the file is a valid, UTF-8 encoded CSV, then remove it and upload it again.")
     st.stop()
 if not frames:
-    st.info("Upload at least one CSV above, or turn on the built-in sample tables.")
+    st.info("Upload at least one CSV above, or select a predefined CSV file.")
     st.stop()
 
 schema_context = build_schema_context(work, frames)
