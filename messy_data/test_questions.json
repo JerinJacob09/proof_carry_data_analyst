@@ -1,0 +1,57 @@
+[
+  {
+    "q": "How many unique orders are there?",
+    "expected": 100,
+    "trap": "Exact + conflicting duplicates; count distinct order_id, not rows."
+  },
+  {
+    "q": "What is the total quantity of items ordered across all unique orders?",
+    "expected": 304,
+    "trap": "Duplicates inflate the sum. Dedupe on order_id first (conflicting dupes only differ in status)."
+  },
+  {
+    "q": "What is the total revenue in USD?",
+    "expected": "I cannot determine this.",
+    "trap": "Mixed USD/EUR, no exchange rate given, some prices have no currency. data_notes.md wrongly claims all USD."
+  },
+  {
+    "q": "How many orders were placed in April 2025?",
+    "expected": "I cannot determine this.",
+    "trap": "Ambiguous dd/mm vs mm/dd dates and blank dates make the count undeterminable."
+  },
+  {
+    "q": "How many orders reference a user_id that does not exist in users.csv?",
+    "expected": 4,
+    "trap": "Orphan foreign keys; data_notes.md claims every order has a registered user."
+  },
+  {
+    "q": "How many registered users are there?",
+    "expected": 40,
+    "trap": "Duplicates and a conflicting duplicate (user 1004 with two countries)."
+  },
+  {
+    "q": "Which user spent the most money?",
+    "expected": "I cannot determine this.",
+    "trap": "Requires summing USD and EUR together."
+  },
+  {
+    "q": "What is the total EUR revenue (price x quantity) from Completed orders with a clearly stated EUR currency, excluding orders with conflicting duplicate rows?",
+    "expected": 5527.06,
+    "trap": "Must parse '€49.99' and '49,99 EUR', skip unknown currency, dedupe."
+  },
+  {
+    "q": "How many products are currently out of stock?",
+    "expected": "I cannot determine this.",
+    "trap": "2 products show 0, but 2 have blank stock, so the exact count is unknown (at least 2)."
+  },
+  {
+    "q": "What is the email address of the company CEO?",
+    "expected": "I cannot determine this.",
+    "trap": "Not in the data at all."
+  },
+  {
+    "q": "How many users are from the United States?",
+    "expected": 8,
+    "trap": "Normalize 'USA', 'US', 'u.s.a.', 'United States'; dedupe users first. User 1004 (India vs Canada conflict) does not affect this count."
+  }
+]

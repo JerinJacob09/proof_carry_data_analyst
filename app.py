@@ -9,6 +9,7 @@ Streamlit Cloud: set this file as the main file and add GROQ_API_KEY
 
 from __future__ import annotations
 
+import hashlib
 import shutil
 import tempfile
 from pathlib import Path
@@ -44,6 +45,15 @@ def _save_uploads(files, dest: Path) -> None:
     dest.mkdir(parents=True, exist_ok=True)
     for f in files:
         (dest / Path(f.name).name).write_bytes(f.getvalue())
+
+
+def _uploads_fingerprint(files) -> tuple[tuple[str, str], ...]:
+    """Name + content hash so re-uploading the same filename still reloads."""
+    items = []
+    for f in files or []:
+        digest = hashlib.sha256(f.getvalue()).hexdigest()
+        items.append((Path(f.name).name, digest))
+    return tuple(sorted(items))
 
 
 def _render_attempts(attempts) -> None:
@@ -93,8 +103,9 @@ st.caption(
     "Refuses trick questions the data cannot answer. Mixed units are not assumed to be only USD/EUR."
 )
 
-ws_key = (use_builtin, tuple(sorted(f.name for f in (uploaded or []))))
+ws_key = (use_builtin, _uploads_fingerprint(uploaded))
 if st.session_state.get("_ws_key") != ws_key:
+    old_work = st.session_state.get("work_dir")
     work = Path(tempfile.mkdtemp(prefix="pcda_"))
     if use_builtin:
         _copy_default_csvs(work)
@@ -102,6 +113,8 @@ if st.session_state.get("_ws_key") != ws_key:
         _save_uploads(uploaded, work)
     st.session_state._ws_key = ws_key
     st.session_state.work_dir = str(work)
+    if old_work and Path(old_work) != work:
+        shutil.rmtree(old_work, ignore_errors=True)
 work = Path(st.session_state.work_dir)
 
 frames = load_frames(work)
