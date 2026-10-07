@@ -11,7 +11,6 @@ REFUSAL = "I cannot determine this."
 # llama-3.3-70b-versatile was retired by Groq (Aug 2026).
 DEFAULT_GROQ_MODEL = "openai/gpt-oss-120b"
 DEFAULT_GEMINI_MODEL = "gemini-2.0-flash"
-MODEL = os.getenv("GROQ_MODEL", DEFAULT_GROQ_MODEL)
 
 try:
     from dotenv import load_dotenv
@@ -34,6 +33,10 @@ except Exception:
                 break
     except Exception:
         pass
+
+# MODULE-LEVEL convenience alias — evaluated after .env is loaded so GROQ_MODEL
+# in .env is visible.  Prefer _resolve_model() for all runtime call-sites.
+MODEL = os.getenv("GROQ_MODEL", DEFAULT_GROQ_MODEL)
 
 
 def _from_streamlit_secrets(name: str) -> str | None:
@@ -136,47 +139,13 @@ The CSVs are rigged. Your code must actively handle these traps:
   plus unknown ISO codes, unknown symbols, and bare '49.99' with NO unit.
 - Do NOT hard-code a two-currency if/else. Inspect the column and parse EVERY distinct unit.
 - PARSE amount and unit separately. Match longer tokens first so CA$/A$/NZ$/HK$/S$/US$/R$ are not treated as USD '$'.
-
-def parse_money(val):
-    s = str(val).strip()
-    if not s or s.lower() in {'nan', 'none', 'null'}:
-        return float('nan'), None
-    symbols = [
-        ('CA$', 'CAD'), ('A$', 'AUD'), ('NZ$', 'NZD'), ('HK$', 'HKD'),
-        ('S$', 'SGD'), ('US$', 'USD'), ('R$', 'BRL'),
-        ('€', 'EUR'), ('£', 'GBP'), ('¥', 'JPY'), ('₹', 'INR'), ('₩', 'KRW'),
-        ('$', 'USD'),
-    ]
-    unit = None
-    rest = s
-    upper = s.upper()
-    for sym, code in symbols:
-        if sym in s or sym.upper() in upper:
-            unit = code
-            rest = s.replace(sym, '').replace(sym.upper(), '').replace(sym.lower(), '')
-            break
-    iso = re.search(r'(?<![A-Z])([A-Z]{3})(?![A-Z])', rest.upper())
-    if iso:
-        unit = iso.group(1)
-        rest = re.sub(iso.group(1), '', rest, count=1, flags=re.I)
-    if unit is None:
-        letters = re.findall(r'[A-Za-z]+', rest)
-        if letters:
-            unit = letters[-1].upper()  # unknown unit still counts as a unit
-            rest = re.sub(re.escape(letters[-1]), '', rest, count=1, flags=re.I)
-    num = rest.replace(' ', '')
-    if num.count(',') == 1 and num.count('.') == 0:
-        num = num.replace(',', '.')
-    else:
-        num = num.replace(',', '')
-    num = re.sub(r'[^0-9.\\-]', '', num)
-    try:
-        amount = float(num) if num not in {'', '.', '-', '-.'} else float('nan')
-    except Exception:
-        amount = float('nan')
-    return amount, unit
-
-- After parsing, list the distinct units actually present (including unknown codes). Do not assume {USD, EUR}.
+- parse_money(val) is already available in your namespace — you do NOT need to import or define it.
+  Signature: parse_money(val) -> (amount: float, currency: str | None)
+  Returns (nan, None) for blanks/nulls. Unit is None only for bare numbers with no marker.
+  You MUST use parse_money to split every price value. Do not write your own currency parser.
+  Example:
+    amounts, units = zip(*df['price'].map(parse_money))
+    df = df.assign(amount=amounts, unit=units)
 - You MAY total rows whose parsed unit matches the unit the question asked for (after mapping symbols → ISO).
 - NEVER invent an exchange rate. NEVER add amounts across different units.
 - If the question needs one combined number across mixed units (e.g. "total revenue" / "who spent the most" with no FX table), output: I cannot determine this.
@@ -236,19 +205,43 @@ def _normalize_error_history(error_history) -> str:
 
 
 def _normalize_output(cleaned: str) -> str:
+    """Coerce LLM output to either pure runnable code or the canonical refusal string.
+
+    Decision tree
+    -------------
+    1. Exact refusal → REFUSAL.
+    2. No refusal string present → return as-is (code path).
+    3. Refusal present AND no code markers → pure prose refusal → REFUSAL.
+    4. Refusal present AND code markers present → mixed reply.
+       Strip the refusal line(s) and return the remaining code.  The model was
+       told to output *only* code or *only* the refusal; a mixed reply means it
+       started to refuse then added code (or vice-versa).  The code is the
+       useful part — pass it to the sandbox.  If the code is genuinely wrong the
+       sandbox will catch it and the retry loop will fix it.
+    """
     cleaned = (cleaned or "").strip()
     if cleaned == REFUSAL:
         return REFUSAL
-    if REFUSAL in cleaned:
-        code_markers = ("import ", "print(", "assert ", "pd.", "DataFrame", "read_csv", "=")
-        if not any(m in cleaned for m in code_markers):
-            return REFUSAL
-        for line in cleaned.splitlines():
-            if line.strip() == REFUSAL:
-                return REFUSAL
-        if len(cleaned) < len(REFUSAL) + 100:
-            return REFUSAL
-    return cleaned
+
+    if REFUSAL not in cleaned:
+        return cleaned
+
+    code_markers = ("import ", "print(", "assert ", "pd.", "DataFrame", "read_csv", "def ", "=")
+    has_code = any(m in cleaned for m in code_markers)
+
+    if not has_code:
+        # Pure prose with the refusal embedded — treat as refusal.
+        return REFUSAL
+
+    # Mixed: strip every line that is exactly the refusal sentence, then return
+    # the code.  Also strip common apologetic preamble lines.
+    kept = [
+        line for line in cleaned.splitlines()
+        if line.strip() != REFUSAL
+    ]
+    result = "\n".join(kept).strip()
+    # If stripping left nothing, fall back to refusal.
+    return result if result else REFUSAL
 
 
 def _call_groq(api_key: str, model: str, user_prompt: str) -> str:

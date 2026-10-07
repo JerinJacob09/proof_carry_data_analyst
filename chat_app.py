@@ -33,8 +33,22 @@ def _workspace() -> tempfile.TemporaryDirectory:
     return td
 
 
-if "work_td" not in st.session_state:
+def _source_mtime_fingerprint() -> tuple[float, ...]:
+    """Return the mtime of each default CSV so we can detect on-disk changes."""
+    return tuple(
+        (DATA_DIR / name).stat().st_mtime if (DATA_DIR / name).is_file() else 0.0
+        for name in DEFAULT_TABLES
+    )
+
+
+# Build or refresh the workspace when source CSVs change on disk.
+current_fingerprint = _source_mtime_fingerprint()
+if (
+    "work_td" not in st.session_state
+    or st.session_state.get("_src_fingerprint") != current_fingerprint
+):
     st.session_state.work_td = _workspace()
+    st.session_state._src_fingerprint = current_fingerprint
 
 work = Path(st.session_state.work_td.name)
 frames = load_frames(work)
@@ -73,7 +87,7 @@ with st.sidebar:
 
     _level, _msg = describe_isolation()
     {"ok": st.success, "refused": st.error, "degraded": st.warning}[_level](_msg)
-    
+
     if st.button("Clear chat", use_container_width=True):
         st.session_state.messages = []
         st.rerun()
@@ -110,11 +124,17 @@ def render_trace(attempts: list[dict]) -> None:
             st.divider()
 
 
+# Replay stored messages.
+# "kind" on assistant messages: "answer" → st.code (safe for * _ $ etc.),
+#                                "prose"  → st.markdown (refusals, errors).
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         if msg.get("attempts"):
             render_trace(msg["attempts"])
-        st.markdown(msg["content"])
+        if msg["role"] == "assistant" and msg.get("kind") == "answer":
+            st.code(msg["content"], language="text")
+        else:
+            st.markdown(msg["content"])
 
 if question := st.chat_input("e.g. How many unique orders are there?  /  How many blue shirts did we sell?"):
     st.session_state.messages.append({"role": "user", "content": question})
@@ -125,7 +145,7 @@ if question := st.chat_input("e.g. How many unique orders are there?  /  How man
         if not (sidebar_key.strip() or _resolve_api_key(None, provider_arg)):
             err = "Missing API key. Use the sidebar, `.env`, or Streamlit Secrets."
             st.error(err)
-            st.session_state.messages.append({"role": "assistant", "content": err, "attempts": []})
+            st.session_state.messages.append({"role": "assistant", "content": err, "attempts": [], "kind": "prose"})
         else:
             with st.status("Agent working...", expanded=True) as status:
                 status.update(label="Writing pandas proof code and running the sandbox...")
@@ -144,7 +164,6 @@ if question := st.chat_input("e.g. How many unique orders are there?  /  How man
                         "success": a.success,
                         "output": a.stdout,
                         "error": a.stderr,
-                        "csv_files_read": list(a.csv_files_read),
                     }
                     for a in result.attempts
                 ]
@@ -153,18 +172,20 @@ if question := st.chat_input("e.g. How many unique orders are there?  /  How man
                 if result.refused:
                     status.update(label="Refused: data cannot answer this", state="complete")
                     st.warning(REFUSAL)
-                    content = REFUSAL
+                    st.session_state.messages.append(
+                        {"role": "assistant", "content": REFUSAL, "attempts": serial, "kind": "prose"}
+                    )
                 elif result.ok:
                     status.update(label="Done", state="complete", expanded=False)
-                    st.markdown(result.answer)
+                    st.code(result.answer, language="text")   # st.code: no markdown mangling
                     st.code(result.code, language="python")
-                    content = result.answer
+                    st.session_state.messages.append(
+                        {"role": "assistant", "content": result.answer, "attempts": serial, "kind": "answer"}
+                    )
                 else:
                     status.update(label="Gave up after max retries", state="error")
                     st.error("The agent could not complete this request.")
-                    st.markdown(result.answer)
-                    content = result.answer
-
-            st.session_state.messages.append(
-                {"role": "assistant", "content": content, "attempts": serial}
-            )
+                    st.code(result.answer, language="text")
+                    st.session_state.messages.append(
+                        {"role": "assistant", "content": result.answer, "attempts": serial, "kind": "prose"}
+                    )

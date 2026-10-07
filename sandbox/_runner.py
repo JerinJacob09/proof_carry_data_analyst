@@ -524,6 +524,61 @@ def _print_user_exception(exc: BaseException) -> None:
     sys.stderr.write("".join(lines))
 
 
+def _make_parse_money(re_module):
+    """Return a parse_money(val) -> (float, str|None) function built from stdlib only.
+
+    Injected directly into the sandbox namespace so generated code can call
+    parse_money(val) without importing anything.  Keeping it here (not in the
+    project) preserves the runner's self-contained requirement.
+    """
+    _symbols = [
+        ("CA$", "CAD"), ("A$", "AUD"), ("NZ$", "NZD"), ("HK$", "HKD"),
+        ("S$", "SGD"), ("US$", "USD"), ("R$", "BRL"),
+        ("\u20ac", "EUR"), ("\u00a3", "GBP"), ("\u00a5", "JPY"),
+        ("\u20b9", "INR"), ("\u20a9", "KRW"), ("$", "USD"),
+    ]
+
+    def parse_money(val):
+        """Parse a messy price string into (amount: float, currency: str | None).
+
+        Returns (nan, None) for blanks/nulls.  Never assumes a bare number is USD.
+        Longer symbol prefixes are matched first (CA$ before $).
+        """
+        import math
+        s = str(val).strip()
+        if not s or s.lower() in {"nan", "none", "null"}:
+            return float("nan"), None
+        unit = None
+        rest = s
+        for sym, code in _symbols:
+            if sym in s:
+                unit = code
+                rest = s.replace(sym, "", 1)
+                break
+        iso = re_module.search(r"(?<![A-Z])([A-Z]{3})(?![A-Z])", rest.upper())
+        if iso:
+            unit = iso.group(1)
+            rest = re_module.sub(iso.group(1), "", rest, count=1, flags=re_module.IGNORECASE)
+        if unit is None:
+            letters = re_module.findall(r"[A-Za-z]+", rest)
+            if letters:
+                unit = letters[-1].upper()
+                rest = re_module.sub(re_module.escape(letters[-1]), "", rest, count=1, flags=re_module.IGNORECASE)
+        num = rest.replace(" ", "")
+        if num.count(",") == 1 and num.count(".") == 0:
+            num = num.replace(",", ".")
+        else:
+            num = num.replace(",", "")
+        num = re_module.sub(r"[^0-9.\-]", "", num)
+        try:
+            amount = float(num) if num not in {"", ".", "-", "-."} else float("nan")
+        except Exception:
+            amount = float("nan")
+        return amount, unit
+
+    return parse_money
+
+
 def _run_user_code(code: str, cfg: dict, namespace_modules: dict, workdir: str) -> int:
     import linecache
 
@@ -613,7 +668,8 @@ def main() -> int:
     rc = _run_user_code(
         cfg["code"],
         cfg,
-        {"pd": pd, "np": np, "json": json, "re": re, "Path": Path},
+        {"pd": pd, "np": np, "json": json, "re": re, "Path": Path,
+         "parse_money": _make_parse_money(re)},
         workdir,
     )
     _status({"event": "csv_reads", "files": sorted(_CSV_READS)})

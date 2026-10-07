@@ -182,10 +182,24 @@ typed = st.text_area(
     "Analytical question",
     placeholder="e.g. How many unique orders are there?",
     height=90,
+    key="question_input",
 )
 st.caption("Try a trick question such as “How many blue shirts did we sell?” — there is no color column.")
-picked = st.selectbox("Example questions", ["(pick an example)"] + examples)
-question = typed.strip() or ("" if picked.startswith("(") else picked)
+
+
+def _on_example_pick():
+    picked = st.session_state.get("example_pick", "(pick an example)")
+    if not picked.startswith("("):
+        st.session_state["question_input"] = picked
+
+
+st.selectbox(
+    "Example questions",
+    ["(pick an example)"] + examples,
+    key="example_pick",
+    on_change=_on_example_pick,
+)
+question = st.session_state.get("question_input", "").strip()
 
 run = st.button("Generate proof + run", type="primary", disabled=not question.strip())
 
