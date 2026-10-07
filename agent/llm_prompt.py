@@ -114,6 +114,7 @@ FORBIDDEN outputs:
 
 PYTHON RULES:
 - pandas, numpy, json, re, and Path are already imported in the sandbox as pd, np, json, re, Path.
+- Use these provided names directly; do not import pandas again or import helper modules such as io/StringIO.
 - CSV files live in the working directory. Load them with pd.read_csv('orders.csv') using the filenames from SCHEMA CONTEXT. Do not invent table or column names.
 - Compute the answer from the data and print it with print(...). Never hard-code the final number.
 - Keep code self-contained, deterministic, top-to-bottom. No input(), plots, or network.

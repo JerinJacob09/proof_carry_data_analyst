@@ -540,6 +540,17 @@ def _run_user_code(code: str, cfg: dict, namespace_modules: dict, workdir: str) 
     )
     namespace = {"__name__": "__main__", "__builtins__": builtins_for_user, **namespace_modules}
     pd = namespace_modules["pd"]
+    # Pandas 3 may infer Arrow-backed strings by default when PyArrow is installed.
+    # On small hosted instances even tiny Arrow allocations can fail under pressure.
+    # Keep CSV string columns on pandas' Python-backed storage in the sandbox.
+    try:
+        pd.options.mode.string_storage = "python"
+    except (AttributeError, ValueError):
+        pass
+    try:
+        pd.options.future.infer_string = False
+    except AttributeError:
+        pass
     original_read_csv = pd.read_csv
 
     def tracked_read_csv(filepath_or_buffer, *args, **kwargs):
