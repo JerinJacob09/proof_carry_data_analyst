@@ -42,7 +42,10 @@
 
 <fieldset>
   <legend>Data + question</legend>
-  <label><input id="useBuiltin" type="checkbox" checked /> Use built-in messy CSVs (orders / users / inventory)</label>
+  <div><strong>Predefined CSV files</strong></div>
+  <label><input class="builtinFile" type="checkbox" value="orders.csv" checked /> orders.csv</label><br />
+  <label><input class="builtinFile" type="checkbox" value="users.csv" checked /> users.csv</label><br />
+  <label><input class="builtinFile" type="checkbox" value="inventory.csv" checked /> inventory.csv</label>
   <p><small>Rigged data: duplicate IDs, mixed units (USD, EUR, GBP, INR, JPY, CAD, AUD…), missing/ambiguous dates. No color column.</small></p>
   <label>Or upload your own CSV table(s) (overrides built-in when provided)<br /><input id="files" type="file" accept=".csv" multiple /></label>
   <p><label>Analytical question<br />
@@ -65,8 +68,8 @@ go.onclick = async () => {
   out.innerHTML = "";
   const files = $("files").files;
   const q = $("question").value.trim();
-  const useBuiltin = $("useBuiltin").checked;
-  if (!files.length && !useBuiltin) { out.innerHTML = '<div class="err">Upload at least one CSV or enable the built-in messy CSVs.</div>'; return; }
+  const builtinFiles = [...document.querySelectorAll(".builtinFile:checked")].map(input => input.value);
+  if (!files.length && !builtinFiles.length) { out.innerHTML = '<div class="err">Upload at least one CSV or select a predefined CSV file.</div>'; return; }
   if (!q) { out.innerHTML = '<div class="err">Type a question.</div>'; return; }
   const fd = new FormData();
   fd.append("question", q);
@@ -74,7 +77,8 @@ go.onclick = async () => {
   fd.append("api_key", $("apiKey").value.trim());
   fd.append("model", $("model").value.trim());
   fd.append("auto_retry", $("retry").checked ? "true" : "false");
-  fd.append("use_builtin", useBuiltin ? "true" : "false");
+  fd.append("builtin_selection_present", "true");
+  for (const name of builtinFiles) fd.append("builtin_files", name);
   go.disabled = true; status.textContent = "Asking Groq for proof code…";
   try {
     const r = await fetch("/api/analyze", { method: "POST", body: fd });

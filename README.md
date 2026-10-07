@@ -19,7 +19,7 @@ python data/messy_data_gen.py
 
 ## API keys (never commit)
 
-Priority: **sidebar / request field → environment / `.env` → Streamlit Secrets**.
+API keys are read from the app environment, a local `.env`, or Streamlit Secrets.
 
 Local `.env` (gitignored):
 
@@ -104,14 +104,14 @@ python -c "from sandbox.executor import ExecutionSandbox; r=ExecutionSandbox().r
 python -c "from agent.llm_prompt import generate_code; print(generate_code('What is 2+2?', 'No tables needed, just print 2+2.'))"
 ```
 
-If step 3 says `GROQ_API_KEY is not set`, your `.env` isn't loading. To prove the sidebar override works, rename `.env` to `.env.bak`, restart the app (it should warn "No API key"), then paste the key in the sidebar / website key field.
+If step 3 says `GROQ_API_KEY is not set`, check that your local `.env` is loading or configure the key in the hosting provider's environment settings.
 
 ## Host on Streamlit Cloud (`xxx.streamlit.app`)
 
 1. Push latest to GitHub.
 2. Go to share.streamlit.io → New app → pick repo/branch.
 3. Main file: `app.py` (or `chat_app.py` for the chat demo — only one; never `main.py`, that's the FastAPI backend).
-4. Paste your key in the sidebar `GROQ_API_KEY` field at runtime (the app reads `.env` only — Cloud Secrets `st.secrets` is no longer wired up).
+4. Add `GROQ_API_KEY` or `GEMINI_API_KEY` to the app's Secrets / environment settings.
 =======
 Open http://127.0.0.1:8000
 >>>>>>> 5581d8b6b08f06243031c676fa6d1661f22801df

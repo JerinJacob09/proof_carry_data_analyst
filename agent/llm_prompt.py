@@ -316,7 +316,7 @@ def generate_code(
     if not resolved_key:
         raise RuntimeError(
             "No LLM API key found. Set GROQ_API_KEY or GEMINI_API_KEY in a local .env, "
-            "Streamlit Cloud Secrets, the sidebar, or an environment variable. "
+            "Streamlit Cloud Secrets or an environment variable. "
             "Never commit the real key."
         )
     resolved_model = _resolve_model(model, resolved_provider)
