@@ -48,7 +48,7 @@ with st.sidebar:
     if sidebar_key.strip() or _resolve_api_key(None, provider_arg):
         st.success("API key found.")
     else:
-        st.warning("Add GROQ_API_KEY or GEMINI_API_KEY via Secrets, `.env`, or the field above.")
+        st.warning("Paste a Groq key above, or set GROQ_API_KEY on Render.")
     if st.button("Clear chat", use_container_width=True):
         st.session_state.messages = []
         st.rerun()

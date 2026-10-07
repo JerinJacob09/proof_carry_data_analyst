@@ -69,7 +69,10 @@ def _render_attempts(attempts) -> None:
 
 with st.sidebar:
     st.header("Setup")
-    st.caption("Keys stay in `.env` locally or Streamlit Secrets in the cloud. Never commit them.")
+    st.caption(
+        "If Render already asked for GROQ_API_KEY, you are done — leave this blank. "
+        "Otherwise paste a Groq key here (starts with gsk_). Never commit keys."
+    )
     provider_options = ["auto", "groq", "gemini"]
     provider_choice = st.selectbox("LLM provider", provider_options, index=0)
     sidebar_key = st.text_input("API key (optional override)", type="password")
@@ -83,7 +86,7 @@ with st.sidebar:
     if effective_key:
         st.success(f"API key found ({default_provider}).")
     else:
-        st.warning("No API key. Add GROQ_API_KEY / GEMINI_API_KEY to Secrets, `.env`, or the field above.")
+        st.warning("No API key yet. Paste a Groq key above, or set GROQ_API_KEY on Render.")
 
     use_builtin = st.checkbox("Use built-in messy CSVs (orders / users / inventory)", value=True)
     uploaded = st.file_uploader("Or upload CSV table(s)", type=["csv"], accept_multiple_files=True)
