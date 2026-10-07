@@ -7,6 +7,7 @@ import tempfile
 from pathlib import Path
 
 import streamlit as st
+from sandbox.executor import describe_isolation
 
 from agent.llm_prompt import REFUSAL, _resolve_api_key, _resolve_model, _resolve_provider
 from agent.react_loop import MAX_RETRIES, run_react
@@ -48,7 +49,11 @@ with st.sidebar:
     if sidebar_key.strip() or _resolve_api_key(None, provider_arg):
         st.success("API key found.")
     else:
-        st.warning("Add GROQ_API_KEY or GEMINI_API_KEY via Secrets, `.env`, or the field above.")
+        st.warning("Paste a Groq key above, or set GROQ_API_KEY on Render.")
+
+    _level, _msg = describe_isolation()
+    {"ok": st.success, "refused": st.error, "degraded": st.warning}[_level](_msg)
+    
     if st.button("Clear chat", use_container_width=True):
         st.session_state.messages = []
         st.rerun()

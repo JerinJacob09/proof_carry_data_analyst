@@ -68,7 +68,7 @@ def _resolve_api_key(explicit: str | None = None, provider: str | None = None) -
     prov = (provider or _resolve_provider()).lower()
     if prov == "gemini":
         return _env_or_secrets("GEMINI_API_KEY", "GOOGLE_API_KEY")
-    return _env_or_secrets("GROQ_API_KEY")
+    return _env_or_secrets("GROQ_API_KEY", "GROK_API_KEY")
 
 
 def _resolve_provider(explicit: str | None = None) -> str:
@@ -77,7 +77,7 @@ def _resolve_provider(explicit: str | None = None) -> str:
     env = _env_or_secrets("LLM_PROVIDER")
     if env:
         return env.lower()
-    if _env_or_secrets("GROQ_API_KEY"):
+    if _env_or_secrets("GROQ_API_KEY", "GROK_API_KEY"):
         return "groq"
     if _env_or_secrets("GEMINI_API_KEY", "GOOGLE_API_KEY"):
         return "gemini"
