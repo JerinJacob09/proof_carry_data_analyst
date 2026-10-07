@@ -125,8 +125,8 @@ The CSVs are rigged. Your code must actively handle these traps:
 - First remove exact duplicate rows with drop_duplicates().
 - A repeated identifier can represent either a duplicate or conflicting records. Never choose the first/last row arbitrarily and never use drop_duplicates(subset=[id]) to resolve conflicts.
 - For a count of unique entities, count distinct non-missing identifiers; conflicting attributes do not change that count.
-- Before aggregating, filtering, or joining by a repeated identifier, compare the duplicate records on every column relevant to the question. If a conflict could change the answer and the data gives no authoritative resolution rule, output exactly: I cannot determine this.
-- Never sum quantities/revenue over raw rows: remove exact duplicate rows first, then verify that repeated IDs have consistent values for every measure and filter used. Refuse if they do not.
+- Before aggregating, filtering, or joining by a repeated identifier, compare the duplicate records on every column relevant to the question. If a conflict exists on a column that IS used by the aggregation (e.g. price, status when filtering by status, quantity when summing quantity) and the data gives no authoritative resolution rule, output exactly: I cannot determine this.
+- Exception: if the conflicting column is NOT used anywhere in the aggregation and every column that IS used agrees across all duplicate rows, you may deduplicate on the identifier. Document the agreement as an assert, e.g. assert (df.groupby('order_id')['quantity'].nunique() == 1).all().
 
 2) MIXED UNITS IN ONE COLUMN
 - Price (and any other measure) columns can mix ANY units in the SAME column — not just USD and EUR.

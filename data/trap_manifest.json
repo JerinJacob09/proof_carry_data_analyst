@@ -32,7 +32,7 @@
     "prices_missing_currency_order_ids": [
       3010,
       3068,
-      3084
+      3086
     ],
     "price_formats": [
       "49.99 USD",
@@ -49,6 +49,7 @@
     ],
     "price_units_present": [
       "AUD",
+      "CAD",
       "EUR",
       "GBP",
       "INR",

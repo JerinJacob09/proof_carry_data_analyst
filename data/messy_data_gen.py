@@ -178,13 +178,17 @@ for i in order_no_currency_idx:
     o_price[i] = f"{o_amount[i]:.2f}"
 
 # Make sure GBP/INR/JPY/CAD/AUD actually appear in orders, not only inventory.
+# Iterate in a stable order and patch a distinct USD slot for each missing currency
+# so we never accidentally overwrite a slot we already patched.
+_patched_slots: set[int] = set()
 for code in ("GBP", "INR", "JPY", "CAD", "AUD"):
     if code in o_currency:
         continue
     for i, c in enumerate(o_currency):
-        if c == "USD" and i not in order_no_currency_idx:
+        if c == "USD" and i not in order_no_currency_idx and i not in _patched_slots:
             o_currency[i] = code
             o_price[i] = messy_price(o_amount[i], code, i % 3)
+            _patched_slots.add(i)
             break
 
 order_true = random_dates(N_ORDERS)
@@ -299,7 +303,13 @@ questions = [
      "trap": "Exact + conflicting duplicates; count distinct order_id, not rows."},
     {"q": "What is the total quantity of items ordered across all unique orders?",
      "expected": int(orders.quantity.sum()),
-     "trap": "Duplicates inflate the sum. Dedupe on order_id first (conflicting dupes only differ in status)."},
+     "trap": (
+         "Exact duplicates inflate the sum — drop them with drop_duplicates() first. "
+         "Conflicting duplicate order IDs differ only in status, not in quantity: "
+         "both rows agree on quantity, so deduping on order_id is safe for this aggregation. "
+         "The system prompt rule ('refuse if conflict could change the answer') does not fire "
+         "here because quantity is identical across the conflicting rows."
+     )},
     {"q": "What is the total revenue in USD?",
      "expected": REFUSE,
      "trap": "Mixed units (USD/EUR/GBP/INR/JPY/CAD/AUD), no FX table, some prices have no unit. data_notes.md wrongly claims all USD."},
@@ -340,13 +350,14 @@ questions = [
 # Validate traps exist, then write files (no cleaning!)
 # ----------------------------------------------------------------------
 price_blob = " ".join(orders_out.price.astype(str)) + " " + " ".join(inventory_out.price.astype(str))
+orders_price_blob = " ".join(orders_out.price.astype(str))
 assert "USD" in price_blob or "$" in price_blob
 assert "EUR" in price_blob or "€" in price_blob
-assert any(t in price_blob for t in ("GBP", "£"))
-assert any(t in price_blob for t in ("INR", "₹"))
-assert any(t in price_blob for t in ("JPY", "¥"))
-assert any(t in price_blob for t in ("CAD", "CA$"))
-assert any(t in price_blob for t in ("AUD", "A$"))
+assert any(t in orders_price_blob for t in ("GBP", "£")),  "GBP missing from orders.csv"
+assert any(t in orders_price_blob for t in ("INR", "₹")),  "INR missing from orders.csv"
+assert any(t in orders_price_blob for t in ("JPY", "¥")),  "JPY missing from orders.csv"
+assert any(t in orders_price_blob for t in ("CAD", "CA$")), "CAD missing from orders.csv"
+assert any(t in orders_price_blob for t in ("AUD", "A$")),  "AUD missing from orders.csv"
 assert len(set(inv_currency)) >= 5
 assert manifest["orders.csv"]["exact_duplicate_rows"] >= 10
 assert manifest["orders.csv"]["blank_order_dates"] >= 10

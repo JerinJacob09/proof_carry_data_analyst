@@ -7,7 +7,7 @@
   {
     "q": "What is the total quantity of items ordered across all unique orders?",
     "expected": 304,
-    "trap": "Duplicates inflate the sum. Dedupe on order_id first (conflicting dupes only differ in status)."
+    "trap": "Exact duplicates inflate the sum — drop them with drop_duplicates() first. Conflicting duplicate order IDs differ only in status, not in quantity: both rows agree on quantity, so deduping on order_id is safe for this aggregation. The system prompt rule ('refuse if conflict could change the answer') does not fire here because quantity is identical across the conflicting rows."
   },
   {
     "q": "What is the total revenue in USD?",
@@ -36,7 +36,7 @@
   },
   {
     "q": "What is the total EUR revenue (price x quantity) from Completed orders with a clearly stated EUR currency, excluding orders with conflicting duplicate rows?",
-    "expected": 5527.06,
+    "expected": 5132.94,
     "trap": "Must parse '€49.99' and '49,99 EUR', skip unknown currency, dedupe."
   },
   {
@@ -56,7 +56,7 @@
   },
   {
     "q": "How many distinct currency units appear in orders.csv prices (ignore blank/unlabeled amounts)?",
-    "expected": 6,
+    "expected": 7,
     "trap": "Must parse ISO codes AND symbols (£, ₹, ¥, CA$, A$, $, €). Do not stop at USD/EUR."
   },
   {

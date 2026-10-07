@@ -42,7 +42,9 @@
 
 <fieldset>
   <legend>Data + question</legend>
-  <label>CSV table(s)<br /><input id="files" type="file" accept=".csv" multiple /></label>
+  <label><input id="useBuiltin" type="checkbox" checked /> Use built-in messy CSVs (orders / users / inventory)</label>
+  <p><small>Rigged data: duplicate IDs, mixed units (USD, EUR, GBP, INR, JPY, CAD, AUD…), missing/ambiguous dates. No color column.</small></p>
+  <label>Or upload your own CSV table(s) (overrides built-in when provided)<br /><input id="files" type="file" accept=".csv" multiple /></label>
   <p><label>Analytical question<br />
     <textarea id="question" placeholder="e.g. How many unique orders are there? Try: How many blue shirts did we sell?"></textarea>
   </label></p>
@@ -63,7 +65,8 @@ go.onclick = async () => {
   out.innerHTML = "";
   const files = $("files").files;
   const q = $("question").value.trim();
-  if (!files.length) { out.innerHTML = '<div class="err">Upload at least one CSV.</div>'; return; }
+  const useBuiltin = $("useBuiltin").checked;
+  if (!files.length && !useBuiltin) { out.innerHTML = '<div class="err">Upload at least one CSV or enable the built-in messy CSVs.</div>'; return; }
   if (!q) { out.innerHTML = '<div class="err">Type a question.</div>'; return; }
   const fd = new FormData();
   fd.append("question", q);
@@ -71,6 +74,7 @@ go.onclick = async () => {
   fd.append("api_key", $("apiKey").value.trim());
   fd.append("model", $("model").value.trim());
   fd.append("auto_retry", $("retry").checked ? "true" : "false");
+  fd.append("use_builtin", useBuiltin ? "true" : "false");
   go.disabled = true; status.textContent = "Asking Groq for proof code…";
   try {
     const r = await fetch("/api/analyze", { method: "POST", body: fd });

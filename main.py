@@ -1,6 +1,7 @@
 """Website backend for the Proof-Carrying Data Analyst (optional FastAPI UI)."""
 
 import re
+import shutil
 import tempfile
 from pathlib import Path
 
@@ -10,7 +11,7 @@ from fastapi.staticfiles import StaticFiles
 
 from agent.llm_prompt import REFUSAL
 from agent.react_loop import run_react
-from agent.schema import build_schema_context
+from agent.schema import DATA_DIR, DEFAULT_TABLES, build_schema_context
 
 app = FastAPI(title="Proof-Carrying Data Analyst")
 WEB_DIR = Path(__file__).resolve().parent / "web"
@@ -30,18 +31,20 @@ def health():
 @app.post("/api/analyze")
 async def analyze(
     question: str = Form(...),
-    files: list[UploadFile] = File(...),
+    files: list[UploadFile] = File(default=[]),
     api_key: str = Form(""),
     model: str = Form(""),
     auto_retry: bool = Form(True),
     provider: str = Form(""),
+    use_builtin: bool = Form(True),
 ):
     question = (question or "").strip()
     if not question:
         return {"ok": False, "error": "Question is empty."}
+
     csvs = [f for f in (files or []) if (f.filename or "").lower().endswith(".csv")]
-    if not csvs:
-        return {"ok": False, "error": "Upload at least one .csv file."}
+    if not csvs and not use_builtin:
+        return {"ok": False, "error": "Upload at least one .csv file, or enable the built-in messy CSVs."}
 
     key = (api_key or "").strip() or None
     mdl = (model or "").strip() or None
@@ -50,6 +53,24 @@ async def analyze(
     with tempfile.TemporaryDirectory() as tmp:
         tmpdir = Path(tmp)
         frames: dict = {}
+
+        # Stage built-in CSVs first so uploads can selectively override them.
+        if use_builtin and not csvs:
+            for name in DEFAULT_TABLES:
+                src = DATA_DIR / name
+                if src.is_file():
+                    shutil.copy2(src, tmpdir / name)
+            notes = DATA_DIR / "data_notes.md"
+            if notes.is_file():
+                shutil.copy2(notes, tmpdir / notes.name)
+            for name in DEFAULT_TABLES:
+                dest = tmpdir / name
+                if dest.is_file():
+                    try:
+                        frames[name] = pd.read_csv(dest)
+                    except Exception as exc:  # noqa: BLE001
+                        return {"ok": False, "error": f"Could not read built-in {name}: {exc}"}
+
         for i, f in enumerate(csvs):
             safe = _safe_csv_name(f.filename or f"table{i}", i)
             data = await f.read()
