@@ -10,7 +10,7 @@ REFUSAL = "I cannot determine this."
 
 # llama-3.3-70b-versatile was retired by Groq (Aug 2026).
 DEFAULT_GROQ_MODEL = "openai/gpt-oss-120b"
-DEFAULT_GEMINI_MODEL = "gemini-2.0-flash"
+DEFAULT_GEMINI_MODEL = "gemini-3.5-flash"
 
 try:
     from dotenv import load_dotenv

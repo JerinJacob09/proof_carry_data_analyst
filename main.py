@@ -10,6 +10,7 @@ from fastapi import FastAPI, File, Form, UploadFile
 from fastapi.staticfiles import StaticFiles
 
 from agent.llm_prompt import REFUSAL
+from agent.document_inputs import stage_uploads
 from agent.react_loop import run_react
 from agent.schema import DATA_DIR, DEFAULT_TABLES, build_schema_context
 
@@ -60,9 +61,9 @@ async def analyze(
     selected_builtins = tuple(
         name for name in DEFAULT_TABLES if name in set(builtin_files) & allowed_builtins
     ) if explicit_selection else (DEFAULT_TABLES if _form_flag(use_builtin, True) else ())
-    csvs = [f for f in (files or []) if (f.filename or "").lower().endswith(".csv")]
-    if not csvs and not selected_builtins:
-        return {"ok": False, "error": "Upload at least one .csv file, or select a predefined CSV file."}
+    uploads = {Path(f.filename or f"upload{i}").name: await f.read() for i, f in enumerate(files or [])}
+    if not uploads and not selected_builtins:
+        return {"ok": False, "error": "Upload a CSV, PDF, DOCX, or image, or select a predefined CSV file."}
 
     key = (api_key or "").strip() or None
     mdl = (model or "").strip() or None
@@ -89,14 +90,11 @@ async def analyze(
                     except Exception as exc:  # noqa: BLE001
                         return {"ok": False, "error": f"Could not read built-in {name}: {exc}"}
 
-        for i, f in enumerate(csvs):
-            safe = _safe_csv_name(f.filename or f"table{i}", i)
-            data = await f.read()
-            (tmpdir / safe).write_bytes(data)
-            try:
-                frames[safe] = pd.read_csv(tmpdir / safe)
-            except Exception as exc:  # noqa: BLE001
-                return {"ok": False, "error": f"Could not read {f.filename}: {exc}"}
+        try:
+            stage_uploads(uploads, tmpdir, api_key=key, provider=prov)
+            frames = {path.name: pd.read_csv(path) for path in sorted(tmpdir.glob("*.csv"))}
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "error": f"Could not process uploaded files: {exc}"}
 
         schema_context = build_schema_context(tmpdir, frames)
         result = run_react(

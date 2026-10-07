@@ -1,6 +1,6 @@
 # Proof-Carrying Data Analyst
 
-A hackathon demo that answers questions about messy CSV tables with generated pandas code. The code runs in an isolated sandbox, and accepted answers include the code and a downloadable bundle containing the CSV inputs.
+A hackathon demo that answers questions about messy tabular and document data with generated pandas code. The code runs in an isolated sandbox, and accepted answers include the code and a downloadable bundle containing the CSV inputs.
 
 ## Run locally
 
@@ -26,7 +26,7 @@ Start the app:
 python -m streamlit run app.py
 ```
 
-The main page supports multiple CSV uploads. It uses the sample tables by default; uploading files switches the samples off. The data preview is under “Preview loaded tables.”
+The main page supports CSV, PDF, Word (`.docx`), and graph image (`.png`, `.jpg`, `.jpeg`, `.webp`) uploads. PDFs and Word documents are converted into source-document CSV tables; chart images and scanned/chart PDF pages are read by the configured vision model. It uses the sample tables by default; uploading files switches the samples off. The data preview is under “Preview loaded tables.”
 
 ## Evaluation
 

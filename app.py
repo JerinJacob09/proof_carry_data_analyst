@@ -20,6 +20,7 @@ import pandas as pd
 import streamlit as st
 
 from agent.llm_prompt import REFUSAL, _resolve_api_key
+from agent.document_inputs import SUPPORTED_EXTENSIONS, stage_uploads
 from agent.proof_bundle import build_proof_bundle
 from agent.react_loop import run_react
 from agent.schema import DATA_DIR, DEFAULT_TABLES, build_schema_context, load_frames
@@ -73,7 +74,7 @@ def _render_attempts(attempts) -> None:
 
 st.title("🧾 Proof-Carrying Data Analyst")
 st.caption(
-    "Upload CSV files, ask a question in plain language, and review the result and generated code. "
+    "Upload CSVs, PDFs, Word documents, or graph images, ask a question in plain language, and review the result and generated code. "
     "Questions the data cannot answer are refused."
 )
 if not _resolve_api_key():
@@ -91,11 +92,11 @@ for _table in DEFAULT_TABLES:
 upload_left, upload_center, upload_right = st.columns([1, 2, 1])
 with upload_center:
     with st.container(border=True):
-        st.subheader("1. Add your CSV files")
-        st.caption("Choose one or more .csv files, or drag them into the box. Uploading switches off the predefined files; you can reselect them below.")
+        st.subheader("1. Add your data and documents")
+        st.caption("Upload CSV tables, PDFs, Word documents (.docx), or graph images. PDFs and Word files become searchable text tables; graph images are read by the configured vision model.")
         uploaded = st.file_uploader(
-            "Upload CSV files",
-            type=["csv"],
+            "Upload files",
+            type=[ext.lstrip(".") for ext in sorted(SUPPORTED_EXTENSIONS)],
             accept_multiple_files=True,
             key=f"csv_tables_{st.session_state._csv_uploader_n}",
             help="Files with the same name replace each other.",
@@ -136,7 +137,11 @@ if st.session_state.get("_ws_key") != ws_key:
     if selected_tables:
         _copy_default_csvs(work, selected_tables)
     if saved_uploads:
-        _write_saved_uploads(saved_uploads, work)
+        try:
+            stage_uploads(saved_uploads, work)
+        except Exception as exc:  # noqa: BLE001
+            st.error(f"Could not process uploaded files: {exc}")
+            st.stop()
     st.session_state._ws_key = ws_key
     st.session_state.work_dir = str(work)
     if old_work and Path(old_work) != work:
@@ -146,11 +151,11 @@ work = Path(st.session_state.work_dir)
 try:
     frames = load_frames(work)
 except Exception as exc:  # noqa: BLE001
-    st.error(f"Could not read a CSV file: {exc}")
-    st.info("Check that the file is a valid, UTF-8 encoded CSV, then remove it and upload it again.")
+    st.error(f"Could not process an uploaded data file: {exc}")
+    st.info("Check that the file is valid and under 20 MB, then remove it and upload it again.")
     st.stop()
 if not frames:
-    st.info("Upload at least one CSV above, or select a predefined CSV file.")
+    st.info("Upload at least one supported file above, or select a predefined CSV file.")
     st.stop()
 
 schema_context = build_schema_context(work, frames)
@@ -176,34 +181,13 @@ typed = st.text_area(
     "Your question",
     placeholder="For example: How many unique orders are there?",
     height=90,
-<<<<<<< HEAD
-    key="question_input",
-)
-st.caption("Try a trick question such as “How many blue shirts did we sell?” — there is no color column.")
-
-
-def _on_example_pick():
-    picked = st.session_state.get("example_pick", "(pick an example)")
-    if not picked.startswith("("):
-        st.session_state["question_input"] = picked
-
-
-st.selectbox(
-    "Example questions",
-    ["(pick an example)"] + examples,
-    key="example_pick",
-    on_change=_on_example_pick,
-)
-question = st.session_state.get("question_input", "").strip()
-=======
     help="Type your own question, or leave this blank to use the example above.",
 )
 question = typed.strip() or ("" if picked.startswith("(") else picked)
->>>>>>> 1b1839096cd0fe05db9fb3b784aac50aa1e2dd30
 
 run_left, run_center, run_right = st.columns([1, 2, 1])
 with run_center:
-    run = st.button("3. Analyze CSVs", type="primary", use_container_width=True, disabled=not question.strip())
+    run = st.button("3. Analyze data", type="primary", use_container_width=True, disabled=not question.strip())
 
 if run:
     if not _resolve_api_key():

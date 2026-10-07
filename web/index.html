@@ -47,7 +47,8 @@
   <label><input class="builtinFile" type="checkbox" value="users.csv" checked /> users.csv</label><br />
   <label><input class="builtinFile" type="checkbox" value="inventory.csv" checked /> inventory.csv</label>
   <p><small>Rigged data: duplicate IDs, mixed units (USD, EUR, GBP, INR, JPY, CAD, AUD…), missing/ambiguous dates. No color column.</small></p>
-  <label>Or upload your own CSV table(s) (overrides built-in when provided)<br /><input id="files" type="file" accept=".csv" multiple /></label>
+  <label>Or upload CSV, PDF, Word (.docx), or graph image files<br /><input id="files" type="file" accept=".csv,.pdf,.docx,.png,.jpg,.jpeg,.webp" multiple /></label>
+  <p><small>PDF and Word text and image/chart readings are added as CSV source tables for proof code to inspect.</small></p>
   <p><label>Analytical question<br />
     <textarea id="question" placeholder="e.g. How many unique orders are there? Try: How many blue shirts did we sell?"></textarea>
   </label></p>
@@ -69,7 +70,7 @@ go.onclick = async () => {
   const files = $("files").files;
   const q = $("question").value.trim();
   const builtinFiles = [...document.querySelectorAll(".builtinFile:checked")].map(input => input.value);
-  if (!files.length && !builtinFiles.length) { out.innerHTML = '<div class="err">Upload at least one CSV or select a predefined CSV file.</div>'; return; }
+  if (!files.length && !builtinFiles.length) { out.innerHTML = '<div class="err">Upload a CSV, PDF, Word document, or image, or select a predefined CSV file.</div>'; return; }
   if (!q) { out.innerHTML = '<div class="err">Type a question.</div>'; return; }
   const fd = new FormData();
   fd.append("question", q);
