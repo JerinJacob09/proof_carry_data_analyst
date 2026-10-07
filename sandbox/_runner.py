@@ -30,6 +30,7 @@ import sys
 EXIT_HARDENING_FAILED = 70
 
 _STATUS_FD: int | None = None
+_CSV_READS: set[str] = set()
 
 
 def _status(obj: dict) -> None:
@@ -538,6 +539,18 @@ def _run_user_code(code: str, cfg: dict, namespace_modules: dict, workdir: str) 
         else __builtins__
     )
     namespace = {"__name__": "__main__", "__builtins__": builtins_for_user, **namespace_modules}
+    pd = namespace_modules["pd"]
+    original_read_csv = pd.read_csv
+
+    def tracked_read_csv(filepath_or_buffer, *args, **kwargs):
+        result = original_read_csv(filepath_or_buffer, *args, **kwargs)
+        if isinstance(filepath_or_buffer, (str, bytes, os.PathLike)):
+            candidate = os.path.realpath(os.path.join(workdir, os.fsdecode(filepath_or_buffer)))
+            if os.path.dirname(candidate) == os.path.realpath(workdir) and candidate.lower().endswith(".csv"):
+                _CSV_READS.add(os.path.basename(candidate))
+        return result
+
+    pd.read_csv = tracked_read_csv
     try:
         exec(compiled, namespace)  # noqa: S102 - this IS the sandboxed execution
     except SystemExit as exc:
@@ -592,6 +605,7 @@ def main() -> int:
         {"pd": pd, "np": np, "json": json, "re": re, "Path": Path},
         workdir,
     )
+    _status({"event": "csv_reads", "files": sorted(_CSV_READS)})
     sys.stdout.flush()
     sys.stderr.flush()
     return rc

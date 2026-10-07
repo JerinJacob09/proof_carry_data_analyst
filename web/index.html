@@ -90,7 +90,8 @@ go.onclick = async () => {
       if (j.attempts) h += renderAttempts(j.attempts);
       out.innerHTML = h; return;
     }
-    out.innerHTML = '<div class="ok"><b>Verified result (program output):</b><pre>' + esc(j.result || "(no output)") + "</pre></div>"
+    const used = (j.attempts || []).filter(x => x.success).flatMap(x => x.csv_files_read || []);
+    out.innerHTML = '<div class="ok"><b>Result (CSV read verified: ' + esc([...new Set(used)].join(", ")) + '):</b><pre>' + esc(j.result || "(no output)") + "</pre></div>"
       + (j.parsed_json ? "<h3>Proof JSON</h3><pre>" + esc(JSON.stringify(j.parsed_json, null, 2)) + "</pre>" : "")
       + renderAttempts(j.attempts);
   } catch (e) {
@@ -100,7 +101,7 @@ go.onclick = async () => {
 
 function renderAttempts(a) {
   if (!a || !a.length) return "";
-  return a.map(x => "<h3>Attempt " + x.attempt + (x.success ? " — ran" : " — failed") + "</h3>"
+  return a.map(x => "<h3>Attempt " + x.attempt + (x.success ? " — CSV read verified" : (String(x.stderr || "").startsWith("VerificationError:") ? " — verification failed" : " — failed")) + "</h3>"
     + "<pre>" + esc(x.code || "") + "</pre>"
     + (x.stdout ? "<b>stdout</b><pre>" + esc(x.stdout) + "</pre>" : "")
     + (x.stderr ? "<b>stderr</b><pre>" + esc(x.stderr) + "</pre>" : "")).join("");

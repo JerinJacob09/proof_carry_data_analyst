@@ -144,6 +144,7 @@ if question := st.chat_input("e.g. How many unique orders are there?  /  How man
                         "success": a.success,
                         "output": a.stdout,
                         "error": a.stderr,
+                        "csv_files_read": list(a.csv_files_read),
                     }
                     for a in result.attempts
                 ]

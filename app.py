@@ -68,11 +68,11 @@ def _render_attempts(attempts) -> None:
             st.markdown(f"**{label}**")
             st.code(att.code, language="python")
             if att.success:
-                st.success("Sandbox: executed successfully")
+                st.success("Verified: read " + ", ".join(att.csv_files_read))
                 if att.stdout:
                     st.code(att.stdout, language="text")
             else:
-                st.error("Sandbox: execution failed")
+                st.error("Verification failed" if att.stderr.startswith("VerificationError:") else "Sandbox: execution failed")
                 st.code(att.stderr, language="text")
             st.divider()
 
@@ -212,8 +212,8 @@ if run:
     elif not result.ok:
         st.error(result.answer)
     else:
-        st.subheader("Verified result")
+        st.subheader("Result (CSV read verified)")
         st.code(result.answer, language="text")
         st.subheader("Proof code")
         st.code(result.code, language="python")
-        st.success("Sandbox execution succeeded. The printed value is computed from the CSVs, not hard-coded.")
+        st.success("Verified: the run successfully read " + ", ".join(result.attempts[-1].csv_files_read) + ".")

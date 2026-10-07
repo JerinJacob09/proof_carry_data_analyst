@@ -98,6 +98,7 @@ async def analyze(
                 "success": a.success,
                 "stdout": a.stdout,
                 "stderr": a.stderr,
+                "csv_files_read": list(a.csv_files_read),
             }
             for a in result.attempts
         ]

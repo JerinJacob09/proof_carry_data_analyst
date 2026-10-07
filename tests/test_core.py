@@ -36,6 +36,15 @@ def test_sandbox_runs_pandas_against_csv(tmp_path):
     res = ExecutionSandbox().run(code, working_dir=str(tmp_path))
     assert res.success, res.stderr
     assert res.stdout.strip() == "6"
+    assert res.verified
+    assert res.csv_files_read == ("orders.csv",)
+
+
+def test_sandbox_does_not_verify_hard_coded_output(tmp_path):
+    res = ExecutionSandbox().run("print(100)", working_dir=str(tmp_path))
+    assert res.success  # execution succeeded
+    assert not res.verified
+    assert res.error_type == "VerificationError"
 
 
 def test_sandbox_rejects_os_import(tmp_path, monkeypatch):
@@ -121,7 +130,7 @@ def test_react_retries_then_succeeds(tmp_path):
         calls["n"] += 1
         if calls["n"] < 3:
             return "raise ValueError('boom')"
-        return "print(42)"
+        return "df = pd.read_csv('t.csv')\nprint(int(df['a'].iloc[0]) + 41)"
 
     result = run_react(
         "q",
@@ -134,6 +143,25 @@ def test_react_retries_then_succeeds(tmp_path):
     assert result.answer.strip() == "42"
     assert len(result.attempts) == 3
     assert calls["n"] == 3
+    assert result.attempts[-1].csv_files_read == ("t.csv",)
+
+
+def test_react_retries_hard_coded_answer_until_csv_is_read(tmp_path):
+    (tmp_path / "t.csv").write_text("a\n1\n", encoding="utf-8")
+    calls = {"n": 0}
+
+    def fake_generate(question, schema_context="", error_history=None, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return "print(100)"
+        return "df = pd.read_csv('t.csv')\nprint(int(df['a'].sum()))"
+
+    result = run_react("q", "schema", str(tmp_path), generate=fake_generate, max_retries=1)
+    assert result.ok and result.answer == "1"
+    assert len(result.attempts) == 2
+    assert not result.attempts[0].success
+    assert "VerificationError" in result.attempts[0].stderr
+    assert result.attempts[1].csv_files_read == ("t.csv",)
 
 
 def test_react_refuses_without_executing(tmp_path):
