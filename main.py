@@ -48,15 +48,21 @@ async def analyze(
     auto_retry: str = Form("true"),
     provider: str = Form(""),
     use_builtin: str = Form("true"),
+    builtin_files: list[str] = Form(default=[]),
+    builtin_selection_present: str = Form("false"),
 ):
     question = (question or "").strip()
     if not question:
         return {"ok": False, "error": "Question is empty."}
 
-    builtin = _form_flag(use_builtin, True)
+    allowed_builtins = set(DEFAULT_TABLES)
+    explicit_selection = _form_flag(builtin_selection_present, False)
+    selected_builtins = tuple(
+        name for name in DEFAULT_TABLES if name in set(builtin_files) & allowed_builtins
+    ) if explicit_selection else (DEFAULT_TABLES if _form_flag(use_builtin, True) else ())
     csvs = [f for f in (files or []) if (f.filename or "").lower().endswith(".csv")]
-    if not csvs and not builtin:
-        return {"ok": False, "error": "Upload at least one .csv file, or enable the built-in messy CSVs."}
+    if not csvs and not selected_builtins:
+        return {"ok": False, "error": "Upload at least one .csv file, or select a predefined CSV file."}
 
     key = (api_key or "").strip() or None
     mdl = (model or "").strip() or None
@@ -66,16 +72,16 @@ async def analyze(
         tmpdir = Path(tmp)
         frames: dict = {}
 
-        # Stage built-in CSVs first so uploads can selectively override them.
-        if builtin and not csvs:
-            for name in DEFAULT_TABLES:
+        # Stage selected built-in CSVs first so uploads can selectively override them.
+        if selected_builtins:
+            for name in selected_builtins:
                 src = DATA_DIR / name
                 if src.is_file():
                     shutil.copy2(src, tmpdir / name)
             notes = DATA_DIR / "data_notes.md"
             if notes.is_file():
                 shutil.copy2(notes, tmpdir / notes.name)
-            for name in DEFAULT_TABLES:
+            for name in selected_builtins:
                 dest = tmpdir / name
                 if dest.is_file():
                     try:
