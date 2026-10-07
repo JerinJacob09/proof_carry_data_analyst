@@ -3,6 +3,7 @@
 Run:
     python -m streamlit run app.py
 
+Render: Blueprint `render.yaml` (GitHub deploy) + GROQ_API_KEY in env.
 Streamlit Cloud: set this file as the main file and add GROQ_API_KEY
 (or GEMINI_API_KEY) under App settings → Secrets.
 """
